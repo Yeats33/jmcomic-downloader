@@ -195,6 +195,20 @@ async function showComicDownloadDirInFileManager() {
 function isDownloading(state: State) {
   return state === 'Pending' || state === 'Downloading' || state === 'Paused'
 }
+
+function canReadChapter(chapterId: number, isDownloaded: boolean | null | undefined) {
+  return isDownloaded === true || store.progresses.has(chapterId)
+}
+
+function openReader(chapterId: number, chapterTitle: string) {
+  if (store.pickedComic === undefined) {
+    return
+  }
+
+  store.readerComic = store.pickedComic
+  store.readerChapterId = chapterId
+  store.readerChapterTitle = chapterTitle
+}
 </script>
 
 <template>
@@ -214,19 +228,29 @@ function isDownloading(state: State) {
       @move="updateSelectedIds"
       @start="unselectAll">
       <n-checkbox-group v-model:value="checkedIds" class="grid grid-cols-3 gap-1.5">
-        <n-checkbox
+        <div
           v-for="{ chapterId, chapterTitle, isDownloaded, state } in chapterInfos"
           :key="chapterId"
           :data-key="chapterId"
-          class="selectable hover:bg-gray-200!"
-          :value="chapterId"
-          :label="chapterTitle"
-          :disabled="isDownloaded === true || isDownloading(state)"
+          class="selectable flex items-center gap-1 hover:bg-gray-200!"
           :class="{
             selected: selectedIds.has(chapterId),
             downloaded: isDownloaded,
             downloading: !isDownloaded && isDownloading(state),
-          }" />
+          }">
+          <n-checkbox
+            class="min-w-0 flex-1"
+            :value="chapterId"
+            :label="chapterTitle"
+            :disabled="isDownloaded === true || isDownloading(state)" />
+          <n-button
+            v-if="canReadChapter(chapterId, isDownloaded)"
+            size="tiny"
+            secondary
+            @click.stop="openReader(chapterId, chapterTitle)">
+            阅读
+          </n-button>
+        </div>
       </n-checkbox-group>
     </SelectionArea>
 

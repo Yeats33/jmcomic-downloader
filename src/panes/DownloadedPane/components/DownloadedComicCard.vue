@@ -80,6 +80,8 @@ async function showComicDownloadDirInFileManager() {
           <PhFolderOpen :size="24" />
         </IconButton>
 
+        <n-button size="tiny" secondary @click.stop="pickComic">阅读</n-button>
+
         <IconButton class="ml-auto" title="导出cbz" @click="exportCbz">
           <PhFileZip :size="24" />
         </IconButton>

@@ -14,6 +14,9 @@ export const useStore = defineStore('store', () => {
   const searchResult = ref<SearchResult>()
   const progressesPaneTabName = ref<ProgressesPaneTabName>('uncompleted')
   const getWeeklyResult = ref<GetWeeklyResult>()
+  const readerComic = ref<Comic | null>(null)
+  const readerChapterId = ref<number | null>(null)
+  const readerChapterTitle = ref('')
 
   return {
     config,
@@ -25,5 +28,8 @@ export const useStore = defineStore('store', () => {
     searchResult,
     progressesPaneTabName,
     getWeeklyResult,
+    readerComic,
+    readerChapterId,
+    readerChapterTitle,
   }
 })
