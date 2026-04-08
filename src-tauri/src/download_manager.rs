@@ -64,6 +64,13 @@ pub struct ChapterDownloadedImgs {
     pub is_downloading: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct RemovedDownloadTask {
+    pub comic_download_dir: PathBuf,
+    pub chapter_download_dir: PathBuf,
+    pub temp_download_dir: PathBuf,
+}
+
 impl DownloadManager {
     pub fn new(app: AppHandle) -> Self {
         let (chapter_concurrency, img_concurrency) = {
@@ -128,6 +135,36 @@ impl DownloadManager {
         };
         task.set_state(DownloadTaskState::Cancelled);
         Ok(())
+    }
+
+    pub fn delete_download_task(&self, chapter_id: i64) -> anyhow::Result<RemovedDownloadTask> {
+        let task = {
+            let mut tasks = self.download_tasks.write();
+            tasks.remove(&chapter_id)
+                .context(format!("未找到章节ID为`{chapter_id}`的下载任务"))?
+        };
+        task.set_state(DownloadTaskState::Cancelled);
+
+        let comic_download_dir = task
+            .comic
+            .comic_download_dir
+            .clone()
+            .context("`comic_download_dir`字段为`None`")?;
+        let chapter_download_dir = task
+            .chapter_info
+            .chapter_download_dir
+            .clone()
+            .context("`chapter_download_dir`字段为`None`")?;
+        let temp_download_dir = task
+            .chapter_info
+            .get_temp_download_dir()
+            .context("获取临时下载目录失败")?;
+
+        Ok(RemovedDownloadTask {
+            comic_download_dir,
+            chapter_download_dir,
+            temp_download_dir,
+        })
     }
 
     pub fn get_chapter_downloaded_imgs(

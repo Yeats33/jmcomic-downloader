@@ -5,12 +5,13 @@ import DownloadedComicCard from './components/DownloadedComicCard.vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import { PhFolderOpen } from '@phosphor-icons/vue'
 import { useStore } from '../../store.ts'
-import { DropdownOption, NIcon } from 'naive-ui'
+import { DropdownOption, NIcon, useDialog } from 'naive-ui'
 import { SelectionArea, SelectionEvent } from '@viselect/vue'
-import { PhChecks, PhCheck, PhX } from '@phosphor-icons/vue'
+import { PhChecks, PhCheck, PhX, PhTrash } from '@phosphor-icons/vue'
 import UpdateDownloadedComicsButton from './components/UpdateDownloadedComicsButton.vue'
 
 const store = useStore()
+const dialog = useDialog()
 
 const selectedIds = ref<Set<number>>(new Set())
 const checkedIds = ref<Set<number>>(new Set())
@@ -57,10 +58,14 @@ watch(
       return
     }
 
-    downloadedComics.value = await commands.getDownloadedComics()
+    await reloadDownloadedComics()
   },
   { immediate: true },
 )
+
+async function reloadDownloadedComics() {
+  downloadedComics.value = await commands.getDownloadedComics()
+}
 
 async function selectExportDir() {
   if (store.config === undefined) {
@@ -161,6 +166,54 @@ async function exportPdf() {
   }
 }
 
+function clearDeletedComicState(comic: Comic) {
+  if (store.pickedComic?.id === comic.id) {
+    store.pickedComic = undefined
+    if (store.currentTabName === 'chapter') {
+      store.currentTabName = 'downloaded'
+    }
+  }
+
+  if (store.readerComic?.id === comic.id) {
+    store.readerComic = null
+    store.readerChapterId = null
+    store.readerChapterTitle = ''
+  }
+}
+
+function confirmDeleteCheckedComics() {
+  if (checkedIds.value.size === 0) {
+    return
+  }
+
+  const comicsToDelete = currentPageComics.value.filter((comic) => checkedIds.value.has(comic.id))
+  if (comicsToDelete.length === 0) {
+    return
+  }
+
+  dialog.warning({
+    title: '删除本地库存',
+    content: `确定删除勾选的 ${comicsToDelete.length} 部漫画吗？这会删除本地下载目录。`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      for (const comic of comicsToDelete) {
+        const result = await commands.deleteDownloadedComic(comic)
+        if (result.status === 'error') {
+          console.error(result.error)
+          continue
+        }
+        clearDeletedComicState(comic)
+      }
+
+      checkedIds.value.clear()
+      selectedIds.value.clear()
+      selectionAreaRef.value?.selection?.clearSelection()
+      await reloadDownloadedComics()
+    },
+  })
+}
+
 function useDropdown() {
   const dropdownX = ref<number>(0)
   const dropdownY = ref<number>(0)
@@ -211,6 +264,22 @@ function useDropdown() {
         },
       },
     },
+    {
+      label: '删除选中项',
+      key: 'delete-selected',
+      icon: () => (
+        <NIcon size="20">
+          <PhTrash />
+        </NIcon>
+      ),
+      props: {
+        onClick: () => {
+          selectedIds.value.forEach((id) => checkedIds.value.add(id))
+          dropdownShowing.value = false
+          confirmDeleteCheckedComics()
+        },
+      },
+    },
   ]
 
   async function showDropdown(e: MouseEvent) {
@@ -252,7 +321,10 @@ function useDropdown() {
         <div>左键拖动进行框选，右键打开菜单</div>
         <div>右边的按钮作用于勾选项</div>
       </div>
-      <n-button class="ml-auto" type="primary" size="small" @click="exportCbz">导出cbz</n-button>
+      <n-button class="ml-auto" type="error" ghost size="small" :disabled="checkedIds.size === 0" @click="confirmDeleteCheckedComics">
+        删除库存
+      </n-button>
+      <n-button type="primary" size="small" @click="exportCbz">导出cbz</n-button>
       <n-button type="primary" size="small" @click="exportPdf">导出pdf</n-button>
     </div>
     <SelectionArea

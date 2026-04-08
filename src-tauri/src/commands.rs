@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -284,6 +284,31 @@ pub fn cancel_download_task(app: AppHandle, chapter_id: i64) -> CommandResult<()
     Ok(())
 }
 
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command(async)]
+#[specta::specta]
+pub async fn delete_download_task(app: AppHandle, chapter_id: i64) -> CommandResult<()> {
+    let download_manager = app.get_download_manager();
+
+    let removed_task = download_manager.delete_download_task(chapter_id).map_err(|err| {
+        CommandError::from(&format!("删除章节ID为`{chapter_id}`的下载任务失败"), err)
+    })?;
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    cleanup_chapter_artifacts(
+        &removed_task.comic_download_dir,
+        &removed_task.chapter_download_dir,
+        &removed_task.temp_download_dir,
+    )
+    .map_err(|err| {
+        CommandError::from(&format!("删除章节ID为`{chapter_id}`的下载任务失败"), err)
+    })?;
+
+    tracing::debug!("删除章节ID为`{chapter_id}`的下载任务成功");
+    Ok(())
+}
+
 #[tauri::command(async)]
 #[specta::specta]
 pub async fn download_comic(app: AppHandle, aid: i64) -> CommandResult<()> {
@@ -528,6 +553,29 @@ pub async fn update_downloaded_comics(app: AppHandle) -> CommandResult<()> {
 
     let _ = UpdateDownloadedComicsEvent::GetComicEnd.emit(&app);
 
+    Ok(())
+}
+
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command(async)]
+#[specta::specta]
+pub fn delete_downloaded_comic(comic: Comic) -> CommandResult<()> {
+    let comic_title = &comic.name;
+    let comic_download_dir = comic
+        .comic_download_dir
+        .as_ref()
+        .context("`comic_download_dir`字段为`None`")
+        .map_err(|err| CommandError::from(&format!("删除漫画`{comic_title}`失败"), err))?;
+
+    if !comic_download_dir.exists() {
+        return Ok(());
+    }
+
+    std::fs::remove_dir_all(comic_download_dir)
+        .context(format!("删除目录`{}`失败", comic_download_dir.display()))
+        .map_err(|err| CommandError::from(&format!("删除漫画`{comic_title}`失败"), err))?;
+
+    tracing::debug!(comic_title, "删除已下载漫画成功");
     Ok(())
 }
 
@@ -789,4 +837,46 @@ pub fn get_synced_comic_in_weekly(
     comic.update_fields(&id_to_dir_map);
 
     Ok(comic)
+}
+
+fn cleanup_chapter_artifacts(
+    comic_download_dir: &Path,
+    chapter_download_dir: &Path,
+    temp_download_dir: &Path,
+) -> anyhow::Result<()> {
+    remove_dir_if_exists(temp_download_dir)
+        .context(format!("删除临时下载目录`{}`失败", temp_download_dir.display()))?;
+    remove_dir_if_exists(chapter_download_dir).context(format!(
+        "删除章节下载目录`{}`失败",
+        chapter_download_dir.display()
+    ))?;
+
+    if comic_download_dir.exists() && !comic_has_downloaded_chapters(comic_download_dir)? {
+        std::fs::remove_dir_all(comic_download_dir)
+            .context(format!("删除漫画目录`{}`失败", comic_download_dir.display()))?;
+    }
+
+    Ok(())
+}
+
+fn remove_dir_if_exists(path: &Path) -> anyhow::Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    std::fs::remove_dir_all(path).context(format!("删除目录`{}`失败", path.display()))?;
+    Ok(())
+}
+
+fn comic_has_downloaded_chapters(comic_download_dir: &Path) -> anyhow::Result<bool> {
+    for entry in WalkDir::new(comic_download_dir)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        if entry.is_chapter_metadata() {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }

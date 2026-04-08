@@ -3,7 +3,7 @@ import { ProgressData } from '../../../types.ts'
 import { ref, watchEffect, computed, nextTick } from 'vue'
 import { SelectionArea, SelectionEvent } from '@viselect/vue'
 import { commands, DownloadTaskState } from '../../../bindings.ts'
-import { DropdownOption, NIcon, ProgressProps } from 'naive-ui'
+import { DropdownOption, NIcon, ProgressProps, useDialog } from 'naive-ui'
 import { useStore } from '../../../store.ts'
 import {
   PhPause,
@@ -16,6 +16,7 @@ import {
 } from '@phosphor-icons/vue'
 
 const store = useStore()
+const dialog = useDialog()
 
 const selectedIds = ref<Set<number>>(new Set())
 const selectionAreaRef = ref<InstanceType<typeof SelectionArea>>()
@@ -87,6 +88,49 @@ function handleProgressContextMenu(chapterId: number) {
   }
   selectedIds.value.clear()
   selectedIds.value.add(chapterId)
+}
+
+async function pauseAllDownloads() {
+  for (const [chapterId, { state }] of uncompletedProgresses.value) {
+    if (state === 'Pending' || state === 'Downloading') {
+      const result = await commands.pauseDownloadTask(chapterId)
+      if (result.status === 'error') {
+        console.error(result.error)
+      }
+    }
+  }
+}
+
+function confirmDeleteSelected() {
+  if (selectedIds.value.size === 0) {
+    return
+  }
+
+  dialog.warning({
+    title: '删除下载任务',
+    content: `确定删除选中的 ${selectedIds.value.size} 个下载任务吗？这会清理对应的临时文件。`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      for (const chapterId of selectedIds.value) {
+        const result = await commands.deleteDownloadTask(chapterId)
+        if (result.status === 'error') {
+          console.error(result.error)
+          continue
+        }
+
+        store.progresses.delete(chapterId)
+        if (store.readerChapterId === chapterId) {
+          store.readerComic = null
+          store.readerChapterId = null
+          store.readerChapterTitle = ''
+        }
+      }
+
+      selectedIds.value.clear()
+      selectionAreaRef.value?.selection?.clearSelection()
+    },
+  })
 }
 
 function useDropdown() {
@@ -207,6 +251,21 @@ function useDropdown() {
         },
       },
     },
+    {
+      label: '删除',
+      key: 'delete',
+      icon: () => (
+        <NIcon size="20">
+          <PhTrash />
+        </NIcon>
+      ),
+      props: {
+        onClick: () => {
+          dropdownShowing.value = false
+          confirmDeleteSelected()
+        },
+      },
+    },
   ]
 
   async function showDropdown(e: MouseEvent) {
@@ -258,15 +317,22 @@ function stateToColorClass(state: DownloadTaskState) {
 </script>
 
 <template>
-  <SelectionArea
-    ref="selectionAreaRef"
-    class="h-full flex flex-col selection-container px-2"
-    :options="{ selectables: '.selectable', features: { deselectOnBlur: true } }"
-    @contextmenu="showDropdown"
-    @move="updateSelectedIds"
-    @start="unselectAll">
-    <span class="ml-auto select-none">左键拖动进行框选，右键打开菜单，双击暂停/继续</span>
-    <div class="h-full select-none">
+  <div class="h-full flex flex-col">
+    <div class="flex items-center gap-2 px-2 pb-2">
+      <span class="select-none text-sm text-gray-500">左键拖动进行框选，右键打开菜单，双击暂停/继续</span>
+      <n-button class="ml-auto" size="small" @click="pauseAllDownloads">暂停全部</n-button>
+      <n-button size="small" type="error" ghost :disabled="selectedIds.size === 0" @click="confirmDeleteSelected">
+        删除选中
+      </n-button>
+    </div>
+    <SelectionArea
+      ref="selectionAreaRef"
+      class="h-full flex flex-col selection-container px-2"
+      :options="{ selectables: '.selectable', features: { deselectOnBlur: true } }"
+      @contextmenu="showDropdown"
+      @move="updateSelectedIds"
+      @start="unselectAll">
+      <div class="h-full select-none">
       <div
         v-for="[chapterId, { state, comic, chapterInfo, percentage, indicator }] in uncompletedProgresses"
         :key="chapterId"
@@ -304,16 +370,17 @@ function stateToColorClass(state: DownloadTaskState) {
           </n-progress>
         </div>
       </div>
-    </div>
-    <n-dropdown
-      placement="bottom-start"
-      trigger="manual"
-      :x="dropdownX"
-      :y="dropdownY"
-      :options="dropdownOptions"
-      :show="dropdownShowing"
-      :on-clickoutside="() => (dropdownShowing = false)" />
-  </SelectionArea>
+      </div>
+      <n-dropdown
+        placement="bottom-start"
+        trigger="manual"
+        :x="dropdownX"
+        :y="dropdownY"
+        :options="dropdownOptions"
+        :show="dropdownShowing"
+        :on-clickoutside="() => (dropdownShowing = false)" />
+    </SelectionArea>
+  </div>
 </template>
 
 <style scoped>
