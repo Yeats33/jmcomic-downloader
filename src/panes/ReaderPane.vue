@@ -187,21 +187,27 @@ onUnmounted(() => {
 
 <template>
   <div v-if="chapterId !== null" class="fixed inset-0 z-50 bg-black flex flex-col">
-    <div class="flex items-center px-4 py-2 bg-gray-8 text-white gap-4">
+    <div class="flex items-center px-4 py-3 bg-gray-9 text-white gap-4 border-b border-gray-7">
       <span class="font-bold truncate">{{ store.readerChapterTitle }}</span>
-      <span class="text-gray-4 whitespace-nowrap">第 {{ currentPage }} / {{ totalPages }} 页</span>
-      <span class="text-gray-4 whitespace-nowrap">已下载 {{ progressLabel }}</span>
-      <span v-if="isDownloading" class="text-yellow-4 animate-pulse whitespace-nowrap">下载中</span>
+      <span class="text-gray-3 whitespace-nowrap">第 {{ currentPage }} / {{ totalPages }} 页</span>
+      <span class="text-gray-3 whitespace-nowrap">已下载 {{ progressLabel }}</span>
+      <span v-if="isDownloading" class="text-yellow-3 animate-pulse whitespace-nowrap font-medium">下载中</span>
 
       <div class="ml-auto flex gap-2">
-        <n-button size="small" quaternary :disabled="!downloadDir" title="在文件管理器中打开" @click="openInFileManager">
+        <n-button
+          size="small"
+          quaternary
+          class="text-white!"
+          :disabled="!downloadDir"
+          title="在文件管理器中打开"
+          @click="openInFileManager">
           <template #icon>
             <n-icon>
               <PhArrowSquareOut />
             </n-icon>
           </template>
         </n-button>
-        <n-button size="small" quaternary title="关闭" @click="closeReader">
+        <n-button size="small" quaternary class="text-white!" title="关闭" @click="closeReader">
           <template #icon>
             <n-icon>
               <PhX />
@@ -211,22 +217,22 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div class="flex-1 overflow-auto flex items-center justify-center p-4" @click="nextPage">
+    <div class="flex-1 overflow-auto flex items-center justify-center p-4 bg-black" @click="nextPage">
       <img
         v-if="currentImgSrc"
         :src="currentImgSrc"
         :style="{ transform: `scale(${scale / 100})`, transformOrigin: 'center center' }"
         class="max-w-full max-h-full object-contain transition-transform duration-200"
         alt="" />
-      <div v-else class="text-white text-center">
+      <div v-else class="text-center bg-gray-9/90 px-6 py-5 rounded-lg border border-gray-7 min-w-70">
         <n-spin v-if="isLoading" size="large" />
-        <div v-if="errorMessage" class="mt-4 text-red-3">{{ errorMessage }}</div>
-        <div v-else class="mt-4">等待图片下载...</div>
+        <div v-if="errorMessage" class="mt-4 text-red-3 break-all">{{ errorMessage }}</div>
+        <div v-else class="mt-4 text-gray-1">等待图片下载...</div>
       </div>
     </div>
 
-    <div class="flex items-center justify-center gap-4 px-4 py-2 bg-gray-8 text-white">
-      <n-button size="small" :disabled="!canGoPrev" @click.stop="prevPage">
+    <div class="flex items-center justify-center gap-4 px-4 py-3 bg-gray-9 text-white border-t border-gray-7">
+      <n-button size="small" class="text-white!" :disabled="!canGoPrev" @click.stop="prevPage">
         <template #icon>
           <n-icon>
             <PhCaretLeft />
@@ -236,15 +242,15 @@ onUnmounted(() => {
       </n-button>
 
       <div class="flex items-center gap-1">
-        <n-button size="tiny" quaternary @click.stop="zoomOut">
+        <n-button size="tiny" quaternary class="text-white!" @click.stop="zoomOut">
           <template #icon>
             <n-icon>
               <PhMagnifyingGlassMinus />
             </n-icon>
           </template>
         </n-button>
-        <span class="w-12 text-center text-sm cursor-pointer" @click.stop="resetZoom">{{ scale }}%</span>
-        <n-button size="tiny" quaternary @click.stop="zoomIn">
+        <span class="w-12 text-center text-sm cursor-pointer text-gray-1" @click.stop="resetZoom">{{ scale }}%</span>
+        <n-button size="tiny" quaternary class="text-white!" @click.stop="zoomIn">
           <template #icon>
             <n-icon>
               <PhMagnifyingGlassPlus />
@@ -253,7 +259,7 @@ onUnmounted(() => {
         </n-button>
       </div>
 
-      <n-button size="small" :disabled="!canGoNext" @click.stop="nextPage">
+      <n-button size="small" class="text-white!" :disabled="!canGoNext" @click.stop="nextPage">
         下一页
         <template #icon>
           <n-icon>

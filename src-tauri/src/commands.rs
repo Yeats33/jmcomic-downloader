@@ -5,7 +5,7 @@ use std::time::Duration;
 // TODO: 用`#![allow(clippy::used_underscore_binding)]`来消除警告
 use anyhow::{anyhow, Context};
 use indexmap::IndexMap;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tauri_plugin_opener::OpenerExt;
 use tauri_specta::Event;
 use tokio::sync::Semaphore;
@@ -223,11 +223,17 @@ pub fn get_chapter_downloaded_imgs(
 ) -> CommandResult<crate::download_manager::ChapterDownloadedImgs> {
     let download_manager = app.get_download_manager();
 
-    download_manager
+    let downloaded_imgs = download_manager
         .get_chapter_downloaded_imgs(&comic, chapter_id)
         .map_err(|err| {
             CommandError::from(&format!("获取章节ID为`{chapter_id}`的已下载图片失败"), err)
-        })
+        })?;
+
+    app.asset_protocol_scope()
+        .allow_directory(&downloaded_imgs.download_dir, true)
+        .map_err(|err| CommandError::from("授权阅读目录失败", err))?;
+
+    Ok(downloaded_imgs)
 }
 
 #[allow(clippy::needless_pass_by_value)]
