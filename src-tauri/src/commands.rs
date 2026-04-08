@@ -216,6 +216,23 @@ pub fn create_download_task(app: AppHandle, comic: Comic, chapter_id: i64) -> Co
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command(async)]
 #[specta::specta]
+pub fn get_chapter_downloaded_imgs(
+    app: AppHandle,
+    comic: Comic,
+    chapter_id: i64,
+) -> CommandResult<crate::download_manager::ChapterDownloadedImgs> {
+    let download_manager = app.get_download_manager();
+
+    download_manager
+        .get_chapter_downloaded_imgs(&comic, chapter_id)
+        .map_err(|err| {
+            CommandError::from(&format!("获取章节ID为`{chapter_id}`的已下载图片失败"), err)
+        })
+}
+
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command(async)]
+#[specta::specta]
 pub fn pause_download_task(app: AppHandle, chapter_id: i64) -> CommandResult<()> {
     let download_manager = app.get_download_manager();
 

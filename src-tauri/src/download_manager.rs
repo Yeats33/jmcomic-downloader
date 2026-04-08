@@ -21,7 +21,7 @@ use tokio::task::JoinSet;
 use tokio::time::sleep;
 
 use crate::events::{DownloadSleepingEvent, DownloadTaskEvent};
-use crate::extensions::{AnyhowErrorToStringChain, AppHandleExt};
+use crate::extensions::{AnyhowErrorToStringChain, AppHandleExt, PathIsImg};
 use crate::types::{ChapterInfo, Comic, DownloadFormat};
 use crate::utils::filename_filter;
 use crate::{utils, DownloadSpeedEvent};
@@ -53,6 +53,15 @@ pub enum DownloadTaskState {
     Cancelled,
     Completed,
     Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterDownloadedImgs {
+    pub download_dir: String,
+    pub downloaded_imgs: Vec<String>,
+    pub total_img_count: u32,
+    pub is_downloading: bool,
 }
 
 impl DownloadManager {
@@ -119,6 +128,39 @@ impl DownloadManager {
         };
         task.set_state(DownloadTaskState::Cancelled);
         Ok(())
+    }
+
+    pub fn get_chapter_downloaded_imgs(
+        &self,
+        comic: &Comic,
+        chapter_id: i64,
+    ) -> anyhow::Result<ChapterDownloadedImgs> {
+        let tasks = self.download_tasks.read();
+        if let Some(task) = tasks.get(&chapter_id) {
+            return task.get_downloaded_imgs();
+        }
+        drop(tasks);
+
+        let chapter_info = comic
+            .chapter_infos
+            .iter()
+            .find(|chapter| chapter.chapter_id == chapter_id)
+            .context(format!("未找到章节ID为`{chapter_id}`的章节信息"))?;
+
+        let chapter_download_dir = chapter_info
+            .chapter_download_dir
+            .as_ref()
+            .context("`chapter_download_dir`字段为`None`，章节可能尚未下载")?;
+
+        let downloaded_imgs = read_downloaded_imgs_from_dir(chapter_download_dir, false)?;
+        let total_img_count = downloaded_imgs.len() as u32;
+
+        Ok(ChapterDownloadedImgs {
+            download_dir: chapter_download_dir.to_string_lossy().to_string(),
+            downloaded_imgs,
+            total_img_count,
+            is_downloading: false,
+        })
     }
 
     #[allow(clippy::cast_precision_loss)]
@@ -204,6 +246,51 @@ impl DownloadTask {
                 }
             }
         }
+    }
+
+    fn get_downloaded_imgs(&self) -> anyhow::Result<ChapterDownloadedImgs> {
+        let state = *self.state_sender.borrow();
+        let state_is_active = matches!(
+            state,
+            DownloadTaskState::Pending | DownloadTaskState::Downloading | DownloadTaskState::Paused
+        );
+
+        let temp_dir = self
+            .chapter_info
+            .get_temp_download_dir()
+            .context("获取临时下载目录失败")?;
+        let regular_dir = self
+            .chapter_info
+            .chapter_download_dir
+            .clone()
+            .context("`chapter_download_dir`字段为`None`")?;
+
+        let dir = if state_is_active {
+            if temp_dir.exists() || !regular_dir.exists() {
+                temp_dir
+            } else {
+                regular_dir
+            }
+        } else if regular_dir.exists() || !temp_dir.exists() {
+            regular_dir
+        } else {
+            temp_dir
+        };
+
+        let downloaded_imgs = read_downloaded_imgs_from_dir(&dir, state_is_active)?;
+        let total_img_count = self.total_img_count.load(Ordering::Relaxed);
+        let total_img_count = if total_img_count == 0 && !state_is_active {
+            downloaded_imgs.len() as u32
+        } else {
+            total_img_count
+        };
+
+        Ok(ChapterDownloadedImgs {
+            download_dir: dir.to_string_lossy().to_string(),
+            downloaded_imgs,
+            total_img_count,
+            is_downloading: state_is_active,
+        })
     }
 
     async fn download_chapter(&self) {
@@ -1058,4 +1145,37 @@ impl ChapterInfo {
         let temp_download_dir = parent.join(format!(".下载中-{chapter_download_dir_name}"));
         Ok(temp_download_dir)
     }
+}
+
+fn read_downloaded_imgs_from_dir(dir: &Path, allow_missing: bool) -> anyhow::Result<Vec<String>> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(err) if allow_missing && err.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Vec::new());
+        }
+        Err(err) => {
+            return Err(anyhow::Error::new(err).context(format!("读取目录`{}`失败", dir.display())));
+        }
+    };
+
+    let mut filenames = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_img())
+        .filter_map(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_owned)
+        })
+        .collect::<Vec<_>>();
+
+    filenames.sort_by_key(|filename| {
+        Path::new(filename.as_str())
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .and_then(|stem| stem.parse::<u32>().ok())
+            .unwrap_or(u32::MAX)
+    });
+
+    Ok(filenames)
 }

@@ -45,6 +45,7 @@ pub fn run() {
             get_weekly,
             get_user_profile,
             create_download_task,
+            get_chapter_downloaded_imgs,
             pause_download_task,
             resume_download_task,
             cancel_download_task,
