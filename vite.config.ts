@@ -12,14 +12,21 @@ const host = process.env.TAURI_DEV_HOST
 // https://vitejs.dev/config/
 export default defineConfig(async ({ command }) => {
   const vueDevTools =
-    command === 'serve' ? (await import('vite-plugin-vue-devtools')).default : undefined
+    command === 'serve'
+      ? await import('vite-plugin-vue-devtools')
+          .then(({ default: plugin }) => plugin())
+          .catch((error) => {
+            console.warn('Skipping vite-plugin-vue-devtools because it failed to load:', error)
+            return undefined
+          })
+      : undefined
 
   return {
     plugins: [
       vue(),
       UnoCSS(),
       vueJsx(),
-      vueDevTools?.(),
+      vueDevTools,
       AutoImport({
         imports: [
           'vue',
