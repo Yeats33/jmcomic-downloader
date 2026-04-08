@@ -6,7 +6,11 @@
 
 一个用于 18comic.vip 禁漫天堂 jmcomic 18comic 的多线程下载器，带图形界面，带收藏夹，**免费下载收费的漫画**，下载速度飞快。图形界面基于[Tauri](https://v2.tauri.app/start/)
 
-🔽 在[Release页面](https://github.com/lanyeeee/jmcomic-downloader/releases)可以直接下载
+> [!NOTE]
+> 本仓库是基于 [lanyeeee/jmcomic-downloader](https://github.com/lanyeeee/jmcomic-downloader) 的独立 fork，并依据项目的 MIT License 继续维护。  
+> 由于上游暂不维护阅读模式相关功能，这个 fork 会继续维护阅读模式及相关改动。
+
+🔽 在[Release页面](https://github.com/Yeats33/jmcomic-downloader/releases)可以直接下载
 
 **如果本项目对你有帮助，欢迎点个 Star⭐ 支持！你的支持是我持续更新维护的动力🙏**
 
@@ -49,7 +53,7 @@ https://github.com/user-attachments/assets/46096bd9-1fde-4474-b297-0f4389dbe770
 我能想到的解决办法只有：
 
 1. 根据下面的**如何构建(build)**，自行编译
-2. 希望你相信我的承诺，我承诺你在[Release页面](https://github.com/lanyeeee/jmcomic-downloader/releases)下载到的所有东西都是安全的。切勿轻信他人分享的文件，请**仅**在[Release页面](https://github.com/lanyeeee/jmcomic-downloader/releases)下载。任何不是从该页面下载的版本均可能**已被篡改**并**真的包含病毒**(而非误报)，包括但不限于`网盘`、`通过邮箱或社交软件分享`、`issue或discussion里的文件`、`其他fork(仓库)`、`其他网站`
+2. 希望你相信我的承诺，我承诺你在[Release页面](https://github.com/Yeats33/jmcomic-downloader/releases)下载到的所有东西都是安全的。切勿轻信他人分享的文件，请**仅**在[Release页面](https://github.com/Yeats33/jmcomic-downloader/releases)下载。任何不是从该页面下载的版本均可能**已被篡改**并**真的包含病毒**(而非误报)，包括但不限于`网盘`、`通过邮箱或社交软件分享`、`issue或discussion里的文件`、`其他fork(仓库)`、`其他网站`
 
 # 🛠️ 如何构建(build)
 
@@ -67,7 +71,7 @@ https://github.com/user-attachments/assets/46096bd9-1fde-4474-b297-0f4389dbe770
 #### 1. 克隆本仓库
 
 ```
-git clone https://github.com/lanyeeee/jmcomic-downloader.git
+git clone https://github.com/Yeats33/jmcomic-downloader.git
 ```
 
 #### 2.安装依赖
@@ -85,11 +89,12 @@ pnpm tauri build
 
 # 🤝 提交PR
 
-**PR请提交至`develop`分支**
+**如果你要给这个 fork 提交 PR，请提交至`main`分支**
 
-**如果想新加一个功能，请先开个`issue`或`discussion`讨论一下，避免无效工作**
+**如果想新加一个功能，请先开个`issue`讨论一下，避免无效工作**
 
-其他情况的PR欢迎直接提交，比如：
+如果你想把改动贡献回上游仓库，请遵循上游仓库自己的分支与提交流程。  
+其他情况的 PR 欢迎直接提交，比如：
 
 1. 🔧 对原有功能的改进
 2. 🐛 修复BUG
