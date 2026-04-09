@@ -18,7 +18,7 @@ jobs:
       VERSION: ${{ steps.get_version.outputs.VERSION }}
       TAG_NAME: ${{ steps.get_version.outputs.TAG_NAME }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
@@ -41,20 +41,20 @@ jobs:
       VERSION: ${{ env.VERSION }}
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.get-version.outputs.TAG_NAME }}
 
       - name: Setup node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: lts/*
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           run_install: false
 
@@ -76,7 +76,7 @@ jobs:
           7z a -tzip ../../../artifacts/jmcomic-downloader_${{ env.VERSION }}_windows_x64_portable.zip jmcomic-downloader.exe
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-assets
           path: artifacts/*
@@ -93,20 +93,20 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.get-version.outputs.TAG_NAME }}
 
       - name: Setup node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: lts/*
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           run_install: false
 
@@ -131,7 +131,7 @@ jobs:
           tar -czf ../../../artifacts/jmcomic-downloader_${{ env.VERSION }}_linux_amd64_portable.tar.gz jmcomic-downloader
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-assets
           path: artifacts/*
@@ -144,22 +144,22 @@ jobs:
       VERSION: ${{ env.VERSION }}
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.get-version.outputs.TAG_NAME }}
 
       - name: Setup node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: lts/*
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
         with:
           targets: aarch64-apple-darwin
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           run_install: false
 
@@ -178,7 +178,7 @@ jobs:
         run: cp src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/jmcomic-downloader_${{ env.VERSION }}_aarch64.dmg artifacts/jmcomic-downloader_${{ env.VERSION }}_macos_aarch64.dmg
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-assets-aarch64
           path: artifacts/*
@@ -190,19 +190,19 @@ jobs:
       contents: write
     steps:
       - name: Download Windows assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: windows-assets
           path: artifacts/windows
 
       - name: Download Linux assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: linux-assets
           path: artifacts/linux
 
       - name: Download macOS aarch64 assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: macos-assets-aarch64
           path: artifacts/macos-aarch64
