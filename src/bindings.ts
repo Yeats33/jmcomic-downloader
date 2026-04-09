@@ -153,6 +153,14 @@ export const commands = {
       else return { status: 'error', error: e as any }
     }
   },
+  async deleteDownloadedComic(comic: Comic): Promise<Result<null, CommandError>> {
+    try {
+      return { status: 'ok', data: await TAURI_INVOKE('delete_downloaded_comic', { comic }) }
+    } catch (e) {
+      if (e instanceof Error) throw e
+      else return { status: 'error', error: e as any }
+    }
+  },
   async showPathInFileManager(path: string): Promise<Result<null, CommandError>> {
     try {
       return { status: 'ok', data: await TAURI_INVOKE('show_path_in_file_manager', { path }) }
@@ -171,14 +179,6 @@ export const commands = {
   },
   async getDownloadedComics(): Promise<Comic[]> {
     return await TAURI_INVOKE('get_downloaded_comics')
-  },
-  async deleteDownloadedComic(comic: Comic): Promise<Result<null, CommandError>> {
-    try {
-      return { status: 'ok', data: await TAURI_INVOKE('delete_downloaded_comic', { comic }) }
-    } catch (e) {
-      if (e instanceof Error) throw e
-      else return { status: 'error', error: e as any }
-    }
   },
   async exportCbz(comic: Comic): Promise<Result<null, CommandError>> {
     try {

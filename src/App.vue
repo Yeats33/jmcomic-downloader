@@ -35,11 +35,13 @@ const themeOverrides: GlobalThemeOverrides = {
 <template>
   <n-config-provider :theme-overrides="themeOverrides">
     <n-modal-provider>
-      <n-notification-provider placement="bottom-right" :max="3">
-        <n-message-provider>
-          <app-content />
-        </n-message-provider>
-      </n-notification-provider>
+      <n-dialog-provider>
+        <n-notification-provider placement="bottom-right" :max="3">
+          <n-message-provider>
+            <app-content />
+          </n-message-provider>
+        </n-notification-provider>
+      </n-dialog-provider>
     </n-modal-provider>
   </n-config-provider>
 </template>
