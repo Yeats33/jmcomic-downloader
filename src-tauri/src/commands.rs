@@ -747,6 +747,17 @@ pub fn export_pdf(app: AppHandle, comic: Comic) -> CommandResult<()> {
     Ok(())
 }
 
+#[tauri::command(async)]
+#[specta::specta]
+#[allow(clippy::needless_pass_by_value)]
+pub fn export_single_pdf(app: AppHandle, comic: Comic) -> CommandResult<()> {
+    let comic_title = &comic.name;
+    export::pdf_single(&app, &comic)
+        .context(format!("漫画`{comic_title}`导出单文件PDF失败"))
+        .map_err(|err| CommandError::from("导出单文件PDF失败", err))?;
+    Ok(())
+}
+
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command(async)]
 #[specta::specta]

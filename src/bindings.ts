@@ -196,6 +196,14 @@ export const commands = {
       else return { status: 'error', error: e as any }
     }
   },
+  async exportSinglePdf(comic: Comic): Promise<Result<null, CommandError>> {
+    try {
+      return { status: 'ok', data: await TAURI_INVOKE('export_single_pdf', { comic }) }
+    } catch (e) {
+      if (e instanceof Error) throw e
+      else return { status: 'error', error: e as any }
+    }
+  },
   async getLogsDirSize(): Promise<Result<number, CommandError>> {
     try {
       return { status: 'ok', data: await TAURI_INVOKE('get_logs_dir_size') }
