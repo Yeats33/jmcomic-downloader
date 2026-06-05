@@ -19,7 +19,7 @@ use zip::{write::SimpleFileOptions, ZipWriter};
 
 use crate::{
     events::{ExportCbzEvent, ExportPdfEvent},
-    extensions::{AnyhowErrorToStringChain, PathIsImg},
+    extensions::{AnyhowErrorToStringChain, AppHandleExt, PathIsImg},
     types::{ChapterInfo, Comic, ComicInfo},
 };
 
@@ -402,9 +402,15 @@ pub fn pdf_single(app: &AppHandle, comic: &Comic) -> anyhow::Result<()> {
     let current = Arc::new(AtomicU32::new(0));
 
     let extension = ExportArchive::Pdf.extension();
-    let comic_export_dir = comic
-        .get_comic_export_dir(app)
-        .context("获取导出目录失败")?;
+    // 合并后的PDF直接放在 export_dir 根目录(不在per-comic子目录中)
+    let export_dir = {
+        let config = app.get_config();
+        let config = config.read();
+        config.export_dir.clone()
+    };
+    // 保证export_dir存在
+    std::fs::create_dir_all(&export_dir)
+        .context(format!("创建目录`{}`失败", export_dir.display()))?;
     // 创建唯一的tmp目录
     let tmp_dir = app
         .path()
@@ -440,7 +446,7 @@ pub fn pdf_single(app: &AppHandle, comic: &Comic) -> anyhow::Result<()> {
     let comic_download_dir_name = &comic
         .get_comic_download_dir_name()
         .context("获取漫画下载目录名失败")?;
-    let save_path = comic_export_dir.join(format!("{comic_download_dir_name}.{extension}"));
+    let save_path = export_dir.join(format!("{comic_download_dir_name}.{extension}"));
     merge_pdf(chapter_pdf_paths, &save_path).context("合并pdf失败")?;
     // 标记为成功，后面drop时就不会发送MergeError事件
     merge_error_event_guard.success = true;
