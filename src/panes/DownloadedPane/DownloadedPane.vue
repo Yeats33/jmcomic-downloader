@@ -166,6 +166,22 @@ async function exportPdf() {
   }
 }
 
+async function exportSinglePdf() {
+  if (checkedIds.value.size === 0) {
+    return
+  }
+
+  store.progressesPaneTabName = 'export'
+  const comics = currentPageComics.value.filter((comic) => checkedIds.value.has(comic.id))
+  for (const comic of comics) {
+    const result = await commands.exportSinglePdf(comic)
+    if (result.status === 'error') {
+      console.error(result.error)
+      return
+    }
+  }
+}
+
 function clearDeletedComicState(comic: Comic) {
   if (store.pickedComic?.id === comic.id) {
     store.pickedComic = undefined
@@ -326,6 +342,7 @@ function useDropdown() {
       </n-button>
       <n-button type="primary" size="small" @click="exportCbz">导出cbz</n-button>
       <n-button type="primary" size="small" @click="exportPdf">导出pdf</n-button>
+      <n-button type="primary" size="small" @click="exportSinglePdf">导出pdf(单文件)</n-button>
     </div>
     <SelectionArea
       class="flex flex-col overflow-auto box-border px-2 selection-container mb-2"

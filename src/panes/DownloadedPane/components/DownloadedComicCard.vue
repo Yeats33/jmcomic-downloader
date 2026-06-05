@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Comic, commands } from '../../../bindings.ts'
 import { useStore } from '../../../store.ts'
-import { PhFilePdf, PhFileZip, PhFolderOpen } from '@phosphor-icons/vue'
+import { PhBook, PhFilePdf, PhFileZip, PhFolderOpen } from '@phosphor-icons/vue'
 import IconButton from '../../../components/IconButton.vue'
 
 const store = useStore()
@@ -30,6 +30,15 @@ async function exportCbz() {
 async function exportPdf() {
   store.progressesPaneTabName = 'export'
   const result = await commands.exportPdf(props.comic)
+  if (result.status === 'error') {
+    console.error(result.error)
+    return
+  }
+}
+
+async function exportSinglePdf() {
+  store.progressesPaneTabName = 'export'
+  const result = await commands.exportSinglePdf(props.comic)
   if (result.status === 'error') {
     console.error(result.error)
     return
@@ -88,6 +97,10 @@ async function showComicDownloadDirInFileManager() {
 
         <IconButton title="导出pdf" @click="exportPdf">
           <PhFilePdf :size="24" />
+        </IconButton>
+
+        <IconButton title="导出pdf(单文件)" @click="exportSinglePdf">
+          <PhBook :size="24" />
         </IconButton>
       </div>
     </div>
