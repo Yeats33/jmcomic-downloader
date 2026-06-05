@@ -337,6 +337,8 @@ function useDropdown() {
         <div>左键拖动进行框选，右键打开菜单</div>
         <div>右边的按钮作用于勾选项</div>
       </div>
+    </div>
+    <div class="flex gap-2 items-center px-2 pb-2 select-none">
       <n-button class="ml-auto" type="error" ghost size="small" :disabled="checkedIds.size === 0" @click="confirmDeleteCheckedComics">
         删除库存
       </n-button>
