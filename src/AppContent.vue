@@ -14,6 +14,7 @@ import { useStore } from './store.ts'
 import LogDialog from './dialogs/LogDialog.vue'
 import WeeklyPane from './panes/WeeklyPane.vue'
 import ReaderPane from './panes/ReaderPane.vue'
+import OnlineReaderPane from './panes/OnlineReaderPane.vue'
 
 const store = useStore()
 
@@ -123,6 +124,7 @@ onMounted(async () => {
     <AboutDialog v-model:showing="aboutDialogShowing" />
     <LogDialog v-model:showing="logViewerShowing" />
     <ReaderPane />
+    <OnlineReaderPane v-if="store.onlineReaderChapter !== null" />
   </div>
 </template>
 

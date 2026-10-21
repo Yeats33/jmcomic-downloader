@@ -6,9 +6,10 @@ import { PhFolderOpen } from '@phosphor-icons/vue'
 import IconButton from '../../components/IconButton.vue'
 import ChapterDownloadPanel from './components/ChapterDownloadPanel.vue'
 import ChapterExportPanel from './components/ChapterExportPanel.vue'
+import ChapterReadPanel from './components/ChapterReadPanel.vue'
 import { NEmpty } from 'naive-ui'
 
-export type ChapterPaneMode = 'download' | 'export'
+export type ChapterPaneMode = 'download' | 'export' | 'read'
 
 const store = useStore()
 
@@ -61,7 +62,8 @@ async function showComicDownloadDirInFileManager() {
         v-if="chapterPaneMode === 'download'"
         v-model:chapter-pane-mode="chapterPaneMode"
         :reload="reloadPickedComic" />
-      <ChapterExportPanel v-else v-model:chapter-pane-mode="chapterPaneMode" :reload="reloadPickedComic" />
+      <ChapterExportPanel v-else-if="chapterPaneMode === 'export'" v-model:chapter-pane-mode="chapterPaneMode" :reload="reloadPickedComic" />
+      <ChapterReadPanel v-else v-model:chapter-pane-mode="chapterPaneMode" />
 
       <div class="flex p-2 pt-0">
         <img
