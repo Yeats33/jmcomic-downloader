@@ -12,8 +12,8 @@ importers:
         specifier: ^2.2.1
         version: 2.2.1(vue@3.5.13(typescript@5.6.2))
       '@tauri-apps/api':
-        specifier: '>=2.0.0-rc.0'
-        version: 2.0.0-rc.6
+        specifier: 2.5.0
+        version: 2.5.0
       '@tauri-apps/plugin-dialog':
         specifier: 2.0.0-rc.1
         version: 2.0.0-rc.1
@@ -749,8 +749,8 @@ packages:
     resolution: {integrity: sha512-tlqY9xq5ukxTUZBmoOp+m61cqwQD5pHJtFY3Mn8CA8ps6yghLH/Hw8UPdqg4OLmFW3IFlcXnQNmo/dh8HzXYIQ==}
     engines: {node: '>=18'}
 
-  '@tauri-apps/api@2.0.0-rc.6':
-    resolution: {integrity: sha512-oENxL0C5WqHNSXWjZEbjnzoBwFFyn8do5S0elOg0ME1cLvWJOAKmqdCnWPpAwtzHQZ+xAzMU0/k8nPpJq4OQYA==}
+  '@tauri-apps/api@2.5.0':
+    resolution: {integrity: sha512-Ldux4ip+HGAcPUmuLT8EIkk6yafl5vK0P0c0byzAKzxJh7vxelVtdPONjfgTm96PbN24yjZNESY8CKo8qniluA==}
 
   '@tauri-apps/cli-darwin-arm64@2.0.0-rc.17':
     resolution: {integrity: sha512-LXlLpavNfhvELPBcjCzQ9DOLx7rlAzZM4iltsaKawAewx30Q0EpIjK53Sg5AR3p5/KzNfCsTMjjpeUZg1AcFgw==}
@@ -2675,7 +2675,7 @@ snapshots:
 
   '@sindresorhus/merge-streams@4.0.0': {}
 
-  '@tauri-apps/api@2.0.0-rc.6': {}
+  '@tauri-apps/api@2.5.0': {}
 
   '@tauri-apps/cli-darwin-arm64@2.0.0-rc.17':
     optional: true
@@ -2722,11 +2722,11 @@ snapshots:
 
   '@tauri-apps/plugin-dialog@2.0.0-rc.1':
     dependencies:
-      '@tauri-apps/api': 2.0.0-rc.6
+      '@tauri-apps/api': 2.5.0
 
   '@tauri-apps/plugin-shell@2.0.0-rc.1':
     dependencies:
-      '@tauri-apps/api': 2.0.0-rc.6
+      '@tauri-apps/api': 2.5.0
 
   '@types/estree@1.0.6': {}
 
