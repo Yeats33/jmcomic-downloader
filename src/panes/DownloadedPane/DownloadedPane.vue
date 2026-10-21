@@ -5,7 +5,17 @@ import DownloadedComicCard from './components/DownloadedComicCard.vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import { PhFolderOpen } from '@phosphor-icons/vue'
 import { useStore } from '../../store.ts'
-import { DropdownOption, NButton, NDropdown, NIcon, NInput, NInputGroup, NInputGroupLabel, NPagination, useDialog } from 'naive-ui'
+import {
+  DropdownOption,
+  NButton,
+  NDropdown,
+  NIcon,
+  NInput,
+  NInputGroup,
+  NInputGroupLabel,
+  NPagination,
+  useDialog,
+} from 'naive-ui'
 import { PartialSelectionOptions, SelectionArea, SelectionEvent } from '@viselect/vue'
 import { PhChecks, PhCheck, PhX, PhTrash } from '@phosphor-icons/vue'
 import UpdateDownloadedComicsButton from './components/UpdateDownloadedComicsButton.vue'
@@ -342,7 +352,13 @@ function useDropdown() {
       </div>
     </div>
     <div class="flex gap-2 items-center px-2 pb-2 select-none">
-      <n-button class="ml-auto" type="error" ghost size="small" :disabled="checkedIds.size === 0" @click="confirmDeleteCheckedComics">
+      <n-button
+        class="ml-auto"
+        type="error"
+        ghost
+        size="small"
+        :disabled="checkedIds.size === 0"
+        @click="confirmDeleteCheckedComics">
         删除库存
       </n-button>
       <n-button type="primary" size="small" @click="exportCbz">导出cbz</n-button>
