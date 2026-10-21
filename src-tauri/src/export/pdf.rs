@@ -125,7 +125,6 @@ pub fn pdf_chapters(app: &AppHandle, comic: &Comic, chapter_ids: Vec<i64>) -> ey
 }
 
 #[allow(clippy::cast_possible_truncation)]
-#[allow(clippy::too_many_lines)]
 #[instrument(level = "error", skip_all, fields(comic_id = comic.id, comic_title = comic.name))]
 pub fn pdf_single(app: &AppHandle, comic: &Comic) -> eyre::Result<()> {
     let comic_id = comic.id;
@@ -162,7 +161,6 @@ pub fn pdf_single(app: &AppHandle, comic: &Comic) -> eyre::Result<()> {
     // 用来记录创建pdf的进度
     let created_count = Arc::new(AtomicU32::new(0));
 
-    let extension = ExportFormat::Pdf.extension();
     // 合并后的PDF直接放在导出目录根目录(不在per-comic子目录中)
     let export_dir = {
         let config = app.get_config().inner().read();
@@ -178,80 +176,58 @@ pub fn pdf_single(app: &AppHandle, comic: &Comic) -> eyre::Result<()> {
         .wrap_err("获取临时目录失败")?
         .join(format!("jmcomic-export-{}", uuid::Uuid::new_v4()));
 
-    // 在临时目录中创建各章节的PDF
-    let chapter_pdf_paths = create_chapter_pdfs(
+    // 在临时目录中创建各章节的PDF(无论成功与否，最后都要清理临时目录)
+    let create_result = create_chapter_pdfs(
         app,
         comic,
         &downloaded_chapters,
         &tmp_dir,
         &create_event_uuid,
         created_count,
-    )?;
+    );
+    let chapter_with_pdf_path = match create_result {
+        Ok(chapter_with_pdf_path) => chapter_with_pdf_path,
+        Err(err) => {
+            remove_dir_best_effort(&tmp_dir);
+            return Err(err);
+        }
+    };
 
     // 标记为成功，后面drop时就不会发送CreateError事件
     create_error_event_guard.success = true;
-    // 发送创建pdf完成事件 (chapter_export_dir是临时目录, 仅供内部使用)
+    // 发送创建pdf完成事件(导出目录是导出目录根目录)
     let _ = ExportPdfEvent::CreateEnd {
         uuid: create_event_uuid,
         comic_id: comic.id,
-        chapter_export_dir: tmp_dir.clone(),
+        chapter_export_dir: export_dir.clone(),
     }
     .emit(app);
 
-    let merge_event_uuid = uuid::Uuid::new_v4().to_string();
-    // 发送开始合并pdf事件
-    let _ = ExportPdfEvent::MergeStart {
-        uuid: merge_event_uuid.clone(),
-        comic_title: comic.name.clone(),
-        total: 1,
+    // 复用`merge_pdf_files`发送合并进度事件并把合并后的PDF保存到导出目录根目录
+    let merge_result = merge_pdf_files(app, comic, &export_dir, chapter_with_pdf_path);
+    // 合并结束后再清理临时目录(合并过程需要读取其中的章节PDF)
+    remove_dir_best_effort(&tmp_dir);
+    merge_result
+}
+
+/// 尽力删除`dir`，失败时只记录警告(不影响调用方的结果)
+fn remove_dir_best_effort(dir: &Path) {
+    if !dir.exists() {
+        return;
     }
-    .emit(app);
-    // 如果success为false，drop时发送MergeError事件
-    let mut merge_error_event_guard = PdfMergeErrorEventGuard {
-        uuid: merge_event_uuid.clone(),
-        app: app.clone(),
-        success: false,
-    };
 
-    let comic_download_dir_name = comic
-        .get_comic_download_dir_name()
-        .wrap_err("获取漫画下载目录名失败")?;
-    let save_path = export_dir.join(format!("{comic_download_dir_name}.{extension}"));
-
-    // 合并pdf
-    merge_pdf_file(chapter_pdf_paths, &save_path).wrap_err("合并pdf失败")?;
-
-    // 发送合并pdf进度事件
-    let _ = ExportPdfEvent::MergeProgress {
-        uuid: merge_event_uuid.clone(),
-        current: 1,
-    }
-    .emit(app);
-    // 标记为成功，后面drop时就不会发送MergeError事件
-    merge_error_event_guard.success = true;
-    // 发送合并pdf完成事件
-    let _ = ExportPdfEvent::MergeEnd {
-        uuid: merge_event_uuid,
-        comic_id: comic.id,
-        chapter_export_dir: save_path,
-    }
-    .emit(app);
-
-    // 清理临时目录 (best-effort, 失败不影响导出结果)
-    if let Err(err) = std::fs::remove_dir_all(&tmp_dir)
-        .wrap_err(format!("删除`{}`失败", tmp_dir.display()))
+    if let Err(err) = std::fs::remove_dir_all(dir).wrap_err(format!("删除`{}`失败", dir.display()))
     {
         tracing::warn!(
-            path = %tmp_dir.display(),
+            path = %dir.display(),
             message = %err,
-            "清理临时导出目录失败",
+            "清理临时目录失败",
         );
     }
-    Ok(())
 }
 
 /// 用`comic`中已下载的章节图片按顺序创建PDF, 保存在`target_dir`中.
-/// 返回按章节`order`排序的PDF路径列表.
+/// 返回按章节`order`排序的`(章节信息, PDF路径)`列表.
 #[allow(clippy::cast_possible_truncation)]
 #[allow(clippy::too_many_lines)]
 #[instrument(level = "error", skip_all, fields(comic_id = comic.id, comic_title = comic.name))]
@@ -262,7 +238,7 @@ fn create_chapter_pdfs(
     target_dir: &Path,
     event_uuid: &str,
     current: Arc<AtomicU32>,
-) -> eyre::Result<Vec<PathBuf>> {
+) -> eyre::Result<Vec<(ChapterInfo, PathBuf)>> {
     let extension = ExportFormat::Pdf.extension();
     // 保证目录存在
     std::fs::create_dir_all(target_dir)
@@ -283,12 +259,13 @@ fn create_chapter_pdfs(
             let _enter = current_span.enter();
             let chapter_title = &chapter_info.chapter_title;
 
-            let chapter_download_dir = chapter_info
-                .chapter_download_dir
-                .as_ref()
-                .ok_or_eyre(format!(
-                    "章节`{chapter_title}`的`chapter_download_dir`字段为`None`"
-                ))?;
+            let chapter_download_dir =
+                chapter_info
+                    .chapter_download_dir
+                    .as_ref()
+                    .ok_or_eyre(format!(
+                        "章节`{chapter_title}`的`chapter_download_dir`字段为`None`"
+                    ))?;
 
             let image_paths = get_image_paths(chapter_download_dir, true).wrap_err(format!(
                 "获取章节`{chapter_title}`目录`{}`中的图片失败",
@@ -317,12 +294,9 @@ fn create_chapter_pdfs(
         })
     })?;
 
-    let mut chapter_with_pdf_path = std::mem::take(&mut *chapter_with_pdf_path.lock());
-    chapter_with_pdf_path.sort_by_key(|(chapter_info, _)| chapter_info.order);
-    Ok(chapter_with_pdf_path
-        .into_iter()
-        .map(|(_, pdf_path)| pdf_path)
-        .collect())
+    // 顺序由调用方(`merge_pdf_files`)按章节`order`排序
+    let mut chapter_with_pdf_path_guard = chapter_with_pdf_path.lock();
+    Ok(std::mem::take(&mut *chapter_with_pdf_path_guard))
 }
 
 #[allow(clippy::cast_possible_truncation)]
@@ -480,7 +454,7 @@ fn merge_pdf_files(
     comic_export_dir: &Path,
     mut chapter_and_pdf_path_pairs: Vec<(ChapterInfo, PathBuf)>,
 ) -> eyre::Result<()> {
-    chapter_and_pdf_path_pairs.sort_by(|(a, _), (b, _)| a.order.cmp(&b.order));
+    chapter_and_pdf_path_pairs.sort_by_key(|(chapter_info, _)| chapter_info.order);
     let chapter_pdf_paths: Vec<PathBuf> = chapter_and_pdf_path_pairs
         .into_iter()
         .map(|(_, pdf_path)| pdf_path)
