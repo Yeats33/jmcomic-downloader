@@ -148,6 +148,7 @@ impl DownloadImgTask {
         };
 
         if let Err(err) = save_img(
+            &self.download_task.image_writes,
             &save_path,
             download_format,
             self.block_num,
@@ -278,6 +279,7 @@ pub fn calculate_block_num(scramble_id: i64, id: i64, filename: &str) -> u32 {
     )
 )]
 async fn save_img(
+    image_writes: &super::image_writes::ImageWrites,
     save_path: &Path,
     download_format: DownloadFormat,
     block_num: u32,
@@ -285,8 +287,13 @@ async fn save_img(
     src_format: ImageFormat,
 ) -> eyre::Result<()> {
     if src_format == ImageFormat::Gif {
-        std::fs::write(save_path, src_img_data)
-            .wrap_err(format!("保存图片`{}`失败", save_path.display()))?;
+        let save_path = save_path.to_path_buf();
+        image_writes
+            .run(move || {
+                std::fs::write(&save_path, src_img_data)
+                    .wrap_err(format!("保存图片`{}`失败", save_path.display()))
+            })
+            .await?;
         tracing::trace!("图片成功保存到磁盘");
         return Ok(());
     }
@@ -328,12 +335,7 @@ async fn save_img(
         Ok(())
     };
 
-    let (sender, receiver) = tokio::sync::oneshot::channel::<eyre::Result<()>>();
-    rayon::spawn(move || {
-        let _ = sender.send(process_img());
-    });
-
-    let result = receiver.await?;
+    let result = image_writes.run(process_img).await;
     tracing::trace!("图片成功保存到磁盘");
     result
 }

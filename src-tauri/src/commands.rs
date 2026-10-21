@@ -3,7 +3,7 @@ use std::time::Duration;
 use std::{
     fs::File,
     io::{BufRead, BufReader},
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
 
 // TODO: 用`#![allow(clippy::used_underscore_binding)]`来消除警告
@@ -18,6 +18,7 @@ use tokio::time::sleep;
 use tracing::{instrument, Instrument};
 use walkdir::WalkDir;
 
+use crate::cleanup;
 use crate::config::Config;
 use crate::errors::{CommandError, CommandResult};
 use crate::events::{DownloadAllFavoritesEvent, UpdateDownloadedComicsEvent};
@@ -320,22 +321,55 @@ pub fn cancel_download_task(app: AppHandle, chapter_id: i64) -> CommandResult<()
 #[instrument(level = "error", skip_all, fields(chapter_id = chapter_id))]
 pub async fn delete_download_task(app: AppHandle, chapter_id: i64) -> CommandResult<()> {
     let download_manager = app.get_download_manager();
+    let _cleanup_guard = download_manager.cleanup_gate.clone().lock_owned().await;
 
-    let removed_task = download_manager.delete_download_task(chapter_id).map_err(|err| {
-        CommandError::from(&format!("删除章节ID为`{chapter_id}`的下载任务失败"), err)
-    })?;
+    let removed_task = download_manager
+        .delete_download_task(chapter_id)
+        .map_err(|err| {
+            CommandError::from(&format!("删除章节ID为`{chapter_id}`的下载任务失败"), err)
+        })?;
 
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    cleanup_chapter_artifacts(
-        &removed_task.comic_download_dir,
-        &removed_task.chapter_download_dir,
-        &removed_task.temp_download_dir,
+    let _finished_writes = tokio::time::timeout(
+        Duration::from_secs(5),
+        removed_task.task.wait_until_stopped(),
     )
-    .map_err(|err| {
-        CommandError::from(&format!("删除章节ID为`{chapter_id}`的下载任务失败"), err)
-    })?;
+    .await
+    .map_err(|err| CommandError::from("下载任务仍在写入，请稍后重试删除", err))?
+    .map_err(|err| CommandError::from("等待下载任务结束失败", err))?;
+    let download_dir = &removed_task.download_dir;
 
+    let comic_download_dir = &removed_task.comic_download_dir;
+    // 其他章节的任务还在下载时，保留漫画目录(它们需要写入临时目录)
+    let other_tasks = download_manager.has_active_tasks_of_comic(comic_download_dir, chapter_id);
+
+    removed_task
+        .task
+        .validate_cleanup_paths()
+        .map_err(|err| CommandError::from("清理下载路径校验失败", err))?;
+    cleanup::remove_dir_inside(&removed_task.temp_download_dir, download_dir)
+        .await
+        .map_err(|err| {
+            CommandError::from(&format!("删除章节ID为`{chapter_id}`的下载任务失败"), err)
+        })?;
+    cleanup::remove_dir_inside(&removed_task.chapter_download_dir, download_dir)
+        .await
+        .map_err(|err| {
+            CommandError::from(&format!("删除章节ID为`{chapter_id}`的下载任务失败"), err)
+        })?;
+
+    if other_tasks {
+        tracing::debug!("漫画目录中存在其他下载任务，跳过删除漫画目录");
+    } else if let Err(err) =
+        cleanup::remove_comic_dir_if_no_chapters(comic_download_dir, download_dir).await
+    {
+        tracing::warn!(
+            comic_download_dir = %comic_download_dir.display(),
+            message = %err,
+            "漫画目录为空但删除失败"
+        );
+    }
+
+    download_manager.complete_delete_download_task(chapter_id);
     tracing::debug!("删除章节ID为`{chapter_id}`的下载任务成功");
     Ok(())
 }
@@ -595,7 +629,9 @@ pub async fn update_downloaded_comics(app: AppHandle) -> CommandResult<()> {
 #[tauri::command(async)]
 #[specta::specta]
 #[instrument(level = "error", skip_all, fields(comic_id = comic.id, comic_title = comic.name))]
-pub fn delete_downloaded_comic(comic: Comic) -> CommandResult<()> {
+pub async fn delete_downloaded_comic(app: AppHandle, comic: Comic) -> CommandResult<()> {
+    let download_manager = app.get_download_manager();
+    let _cleanup_guard = download_manager.cleanup_gate.clone().lock_owned().await;
     let comic_title = &comic.name;
     let comic_download_dir = comic
         .comic_download_dir
@@ -607,9 +643,41 @@ pub fn delete_downloaded_comic(comic: Comic) -> CommandResult<()> {
         return Ok(());
     }
 
-    std::fs::remove_dir_all(comic_download_dir)
-        .wrap_err(format!("删除目录`{}`失败", comic_download_dir.display()))
+    let download_dir = {
+        let config = app.get_config();
+        let config = config.read();
+        config.download_dir.clone()
+    };
+
+    let resolved = cleanup::resolve_strictly_inside(comic_download_dir, &download_dir)
         .map_err(|err| CommandError::from(&format!("删除漫画`{comic_title}`失败"), err))?;
+    let mut deleting = Vec::new();
+    for chapter_id in download_manager.chapter_ids_of_comic(&resolved) {
+        let task = download_manager
+            .delete_download_task(chapter_id)
+            .map_err(|err| CommandError::from("停止漫画下载任务失败", err))?;
+        deleting.push((chapter_id, task));
+    }
+    let mut finished_writes = Vec::new();
+    for (_, task) in &deleting {
+        let writes = tokio::time::timeout(Duration::from_secs(5), task.task.wait_until_stopped())
+            .await
+            .map_err(|err| CommandError::from("漫画仍在写入，请稍后重试删除", err))?
+            .map_err(|err| CommandError::from("等待漫画写入结束失败", err))?;
+        finished_writes.push(writes);
+    }
+    for (_, task) in &deleting {
+        task.task
+            .validate_cleanup_paths()
+            .map_err(|err| CommandError::from("清理漫画路径校验失败", err))?;
+    }
+    cleanup::remove_dir_inside(comic_download_dir, &download_dir)
+        .await
+        .map_err(|err| CommandError::from(&format!("删除漫画`{comic_title}`失败"), err))?;
+
+    for (chapter_id, _) in &deleting {
+        download_manager.complete_delete_download_task(*chapter_id);
+    }
 
     tracing::debug!(comic_title, "删除已下载漫画成功");
     Ok(())
@@ -899,46 +967,6 @@ pub fn get_synced_comic_in_weekly(
     comic.update_fields(&id_to_dir_map);
 
     Ok(comic)
-}
-
-fn cleanup_chapter_artifacts(
-    comic_download_dir: &Path,
-    chapter_download_dir: &Path,
-    temp_download_dir: &Path,
-) -> eyre::Result<()> {
-    remove_dir_if_exists(temp_download_dir)
-        .wrap_err(format!("删除临时下载目录`{}`失败", temp_download_dir.display()))?;
-    remove_dir_if_exists(chapter_download_dir)
-        .wrap_err(format!("删除章节下载目录`{}`失败", chapter_download_dir.display()))?;
-
-    if comic_download_dir.exists() && !comic_has_downloaded_chapters(comic_download_dir)? {
-        std::fs::remove_dir_all(comic_download_dir)
-            .wrap_err(format!("删除漫画目录`{}`失败", comic_download_dir.display()))?;
-    }
-
-    Ok(())
-}
-
-fn remove_dir_if_exists(path: &Path) -> eyre::Result<()> {
-    if !path.exists() {
-        return Ok(());
-    }
-
-    std::fs::remove_dir_all(path).wrap_err(format!("删除目录`{}`失败", path.display()))?;
-    Ok(())
-}
-
-fn comic_has_downloaded_chapters(comic_download_dir: &Path) -> eyre::Result<bool> {
-    for entry in WalkDir::new(comic_download_dir)
-        .into_iter()
-        .filter_map(Result::ok)
-    {
-        if entry.is_chapter_metadata() {
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
 }
 
 #[allow(clippy::needless_pass_by_value)]
