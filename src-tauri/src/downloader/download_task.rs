@@ -11,7 +11,7 @@ use eyre::{eyre, OptionExt, WrapErr};
 use tauri::AppHandle;
 use tauri_specta::Event;
 use tokio::{
-    sync::{watch, SemaphorePermit},
+    sync::{watch, Mutex, OwnedSemaphorePermit, SemaphorePermit},
     task::JoinSet,
     time::sleep,
 };
@@ -21,7 +21,9 @@ use crate::{
     downloader::{
         download_img_task::{calculate_block_num, DownloadImgTask},
         download_manager::{read_downloaded_imgs_from_dir, ChapterDownloadedImgs},
+        download_paths::DownloadPaths,
         download_task_state::DownloadTaskState,
+        image_writes::ImageWrites,
     },
     events::DownloadEvent,
     extensions::{AppHandleExt, EyreReportToMessage},
@@ -37,6 +39,10 @@ pub struct DownloadTask {
     pub delete_sender: watch::Sender<()>,
     pub downloaded_img_count: Arc<AtomicU32>,
     pub total_img_count: Arc<AtomicU32>,
+    pub(super) paths: DownloadPaths,
+    pub(super) image_writes: ImageWrites,
+    pub(super) deletion_lock: Arc<Mutex<()>>,
+    process_finished: watch::Receiver<()>,
 }
 
 impl DownloadTask {
@@ -63,6 +69,9 @@ impl DownloadTask {
 
         let (state_sender, _) = watch::channel(DownloadTaskState::Pending);
         let (delete_sender, _) = watch::channel(());
+        let download_root = app.get_config().read().download_dir.clone();
+        let paths = DownloadPaths::new(&download_root, &comic, &chapter_info)?;
+        let (finished_sender, process_finished) = watch::channel(());
 
         let task = Arc::new(Self {
             app,
@@ -72,11 +81,41 @@ impl DownloadTask {
             delete_sender,
             downloaded_img_count: Arc::new(AtomicU32::new(0)),
             total_img_count: Arc::new(AtomicU32::new(0)),
+            paths,
+            image_writes: ImageWrites::new(),
+            deletion_lock: Arc::new(Mutex::new(())),
+            process_finished,
         });
 
-        tauri::async_runtime::spawn(task.clone().process());
+        let process_task = task.clone();
+        tauri::async_runtime::spawn(async move {
+            process_task.process().await;
+            drop(finished_sender);
+        });
 
         Ok(task)
+    }
+
+    pub(super) fn is_busy(&self) -> bool {
+        let state = *self.state_sender.borrow();
+        state.is_active()
+            || self.deletion_lock.try_lock().is_err()
+            || !self.image_writes.is_idle()
+            || (state == DownloadTaskState::Cancelled && !self.process_finished())
+    }
+
+    pub(super) fn process_finished(&self) -> bool {
+        self.process_finished.has_changed().is_err()
+    }
+
+    pub async fn wait_until_stopped(&self) -> eyre::Result<OwnedSemaphorePermit> {
+        let mut finished = self.process_finished.clone();
+        while finished.changed().await.is_ok() {}
+        self.image_writes.drain().await
+    }
+
+    pub fn validate_cleanup_paths(&self) -> eyre::Result<()> {
+        self.paths.validate()
     }
 
     #[instrument(
@@ -124,6 +163,9 @@ impl DownloadTask {
 
                 _ = state_receiver.changed() => {
                     self.handle_state_change(&mut permit, &mut state_receiver).await;
+                    if *state_receiver.borrow() == DownloadTaskState::Cancelled {
+                        return;
+                    }
                 }
 
                 _ = delete_receiver.changed() => {
@@ -439,23 +481,18 @@ impl DownloadTask {
         if state == DownloadTaskState::Paused {
             sleep(Duration::from_millis(100)).await;
             tracing::debug!("下载任务已暂停");
-            if let Some(permit) = permit.take() {
-                drop(permit);
-            }
         } else if state == DownloadTaskState::Failed {
             sleep(Duration::from_millis(100)).await;
-            if let Some(permit) = permit.take() {
-                drop(permit);
-            }
+        } else if state == DownloadTaskState::Cancelled {
+            sleep(Duration::from_millis(100)).await;
+            tracing::debug!("下载任务已取消");
         }
+
+        release_permit_if_needed(state, permit);
     }
 
     #[instrument(level = "error", skip_all)]
     async fn handle_delete_receiver_change<'a>(&'a self, permit: &mut Option<SemaphorePermit<'a>>) {
-        let chapter_id = self.chapter_info.chapter_id;
-
-        let _ = DownloadEvent::TaskDelete { chapter_id }.emit(&self.app);
-
         if permit.is_some() {
             sleep(Duration::from_millis(100)).await;
         }
@@ -489,20 +526,13 @@ impl DownloadTask {
         )
     )]
     pub fn set_state(&self, state: DownloadTaskState) {
-        if let Err(err) = self.state_sender.send(state).map_err(eyre::Report::from) {
-            let err_title = format!("发送状态`{state:?}`失败");
-            let message = err.to_message();
-            tracing::error!(err_title, message);
-        }
+        self.state_sender.send_replace(state);
     }
 
     /// 获取当前任务中已下载的图片信息(供阅读模式使用)
     pub fn get_downloaded_imgs(&self) -> eyre::Result<ChapterDownloadedImgs> {
         let state = *self.state_sender.borrow();
-        let state_is_active = matches!(
-            state,
-            DownloadTaskState::Pending | DownloadTaskState::Downloading | DownloadTaskState::Paused
-        );
+        let state_is_active = state.is_active();
 
         let temp_dir = self
             .chapter_info
@@ -561,5 +591,92 @@ impl DownloadTask {
             total_img_count: self.total_img_count.load(Ordering::Relaxed),
         }
         .emit(&self.app);
+    }
+}
+
+/// 任务进入`Paused`/`Failed`/`Cancelled`状态时，需要释放持有中的章节下载permit
+///
+/// 不释放的话，其他章节就再也拿不到permit(表现为所有章节都卡在`排队中`)
+fn release_permit_if_needed<'a>(
+    state: DownloadTaskState,
+    permit: &mut Option<SemaphorePermit<'a>>,
+) {
+    let should_release = match state {
+        DownloadTaskState::Paused | DownloadTaskState::Failed | DownloadTaskState::Cancelled => {
+            true
+        }
+        DownloadTaskState::Pending
+        | DownloadTaskState::Downloading
+        | DownloadTaskState::Completed => false,
+    };
+
+    if should_release {
+        if let Some(permit) = permit.take() {
+            drop(permit);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::sync::Semaphore;
+
+    use super::{release_permit_if_needed, DownloadTaskState};
+
+    /// 模拟`process()`中的章节permit: 任务下载时持有permit
+    fn acquire_permit<'a>(semaphore: &'a Semaphore) -> tokio::sync::SemaphorePermit<'a> {
+        semaphore.try_acquire().expect("应该能拿到permit")
+    }
+
+    #[tokio::test]
+    async fn cancelled_task_releases_the_chapter_permit() {
+        // 回归测试: 取消下载的任务必须释放章节permit，
+        // 否则被取消的任务会永久占用一个下载槽位，其他章节全部卡在`排队中`
+        let semaphore = Semaphore::new(1);
+        let mut permit = Some(acquire_permit(&semaphore));
+
+        release_permit_if_needed(DownloadTaskState::Cancelled, &mut permit);
+
+        assert!(permit.is_none(), "取消任务后应该释放permit");
+        assert!(
+            semaphore.try_acquire().is_ok(),
+            "取消任务后其他章节应该能拿到permit"
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_task_releases_the_chapter_permit() {
+        let semaphore = Semaphore::new(1);
+        let mut permit = Some(acquire_permit(&semaphore));
+
+        release_permit_if_needed(DownloadTaskState::Failed, &mut permit);
+
+        assert!(permit.is_none());
+        assert!(semaphore.try_acquire().is_ok());
+    }
+
+    #[tokio::test]
+    async fn paused_task_releases_the_chapter_permit() {
+        let semaphore = Semaphore::new(1);
+        let mut permit = Some(acquire_permit(&semaphore));
+
+        release_permit_if_needed(DownloadTaskState::Paused, &mut permit);
+
+        assert!(permit.is_none());
+        assert!(semaphore.try_acquire().is_ok());
+    }
+
+    #[tokio::test]
+    async fn downloading_task_keeps_the_chapter_permit() {
+        let semaphore = Semaphore::new(1);
+        let mut permit = Some(acquire_permit(&semaphore));
+
+        release_permit_if_needed(DownloadTaskState::Downloading, &mut permit);
+
+        assert!(permit.is_some(), "下载中的任务不能释放permit");
+        assert!(
+            semaphore.try_acquire().is_err(),
+            "下载中的任务应该继续占用permit"
+        );
     }
 }

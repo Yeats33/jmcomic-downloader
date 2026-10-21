@@ -69,7 +69,7 @@ impl Comic {
                 let mut chapter_title = format!("第{order}话");
                 if !s.name.is_empty() {
                     #[allow(clippy::format_push_string)]
-                    chapter_title.push_str(&format!(" {}", &s.name));
+                    chapter_title.push_str(&format!(" {}", s.name));
                 }
                 let chapter_info = ChapterInfo {
                     chapter_id,

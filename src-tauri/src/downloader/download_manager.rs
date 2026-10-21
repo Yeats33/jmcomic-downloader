@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -14,7 +14,7 @@ use serde::Serialize;
 use specta::Type;
 use tauri::{AppHandle, Manager};
 use tauri_specta::Event;
-use tokio::sync::Semaphore;
+use tokio::sync::{Mutex, OwnedMutexGuard, Semaphore};
 use tracing::instrument;
 
 use crate::{
@@ -36,14 +36,17 @@ pub struct ChapterDownloadedImgs {
 }
 
 /// 被删除的下载任务的相关目录信息(用于清理下载产物)
-#[derive(Debug, Clone)]
 pub struct RemovedDownloadTask {
+    pub task: Arc<DownloadTask>,
+    _deletion_guard: OwnedMutexGuard<()>,
+    pub download_dir: PathBuf,
     pub comic_download_dir: PathBuf,
     pub chapter_download_dir: PathBuf,
     pub temp_download_dir: PathBuf,
 }
 
 pub struct DownloadManager {
+    pub cleanup_gate: Arc<Mutex<()>>,
     pub app: AppHandle,
     pub chapter_sem: Arc<Semaphore>,
     pub img_sem: Arc<Semaphore>,
@@ -60,6 +63,7 @@ impl DownloadManager {
         };
 
         let manager = DownloadManager {
+            cleanup_gate: Arc::new(Mutex::new(())),
             app: app.clone(),
             chapter_sem: Arc::new(Semaphore::new(chapter_concurrency)),
             img_sem: Arc::new(Semaphore::new(img_concurrency)),
@@ -81,8 +85,10 @@ impl DownloadManager {
         fields(comic_id = comic.id, comic_title = comic.name)
     )]
     pub fn create_download_tasks(&self, mut comic: Comic, chapter_ids: &[i64]) {
-        use DownloadTaskState::{Downloading, Paused, Pending};
-
+        let Ok(_cleanup_guard) = self.cleanup_gate.try_lock() else {
+            tracing::error!("下载产物正在清理，请稍后重试创建下载任务");
+            return;
+        };
         if let Err(err) = comic.ensure_download_dir_fields(&self.app) {
             let err_title = "批量创建下载任务失败";
             let message = err.to_message();
@@ -96,8 +102,7 @@ impl DownloadManager {
             let _enter = span.enter();
 
             if let Some(task) = tasks.get(chapter_id) {
-                let state = *task.state_sender.borrow();
-                if matches!(state, Pending | Downloading | Paused) {
+                if task.is_busy() {
                     let err_title = "章节ID对应的下载任务创建失败";
                     let message = eyre!("章节ID对应的下载任务已存在").to_message();
                     tracing::error!(err_title, message);
@@ -106,16 +111,7 @@ impl DownloadManager {
             }
 
             if let Some(task) = tasks.remove(chapter_id) {
-                if let Err(err) = task
-                    .delete_sender
-                    .send(())
-                    .wrap_err("章节ID对应的旧下载任务删除失败")
-                {
-                    let err_title = "章节ID对应的下载任务创建失败";
-                    let message = err.to_message();
-                    tracing::error!(err_title, message);
-                    continue;
-                }
+                task.delete_sender.send_replace(());
             }
 
             let task = match DownloadTask::new(self.app.clone(), comic.clone(), *chapter_id) {
@@ -155,29 +151,20 @@ impl DownloadManager {
         )
     )]
     pub fn create_download_task(&self, comic: Comic, chapter_id: i64) -> eyre::Result<()> {
-        use DownloadTaskState::{Downloading, Paused, Pending};
-
-        let comic_title = comic.name.clone();
+        let _cleanup_guard = self
+            .cleanup_gate
+            .try_lock()
+            .wrap_err("下载产物正在清理，请稍后重试")?;
         let mut tasks = self.download_tasks.write();
 
         if let Some(task) = tasks.get(&chapter_id) {
-            let state = *task.state_sender.borrow();
-            if matches!(state, Pending | Downloading | Paused) {
+            if task.is_busy() {
                 return Err(eyre!("章节ID为`{chapter_id}`的下载任务已存在"));
             }
         }
 
         if let Some(task) = tasks.remove(&chapter_id) {
-            if let Err(err) = task
-                .delete_sender
-                .send(())
-                .wrap_err(format!("章节ID为`{chapter_id}`的旧下载任务删除失败"))
-            {
-                let err_title =
-                    format!("`{comic_title}`的章节ID为`{chapter_id}`的下载任务替换失败");
-                let message = err.to_message();
-                tracing::error!(err_title, message);
-            }
+            task.delete_sender.send_replace(());
         }
 
         let task = DownloadTask::new(self.app.clone(), comic, chapter_id)
@@ -204,43 +191,69 @@ impl DownloadManager {
         let Some(task) = tasks.get(&chapter_id) else {
             return Err(eyre!("未找到章节ID为`{chapter_id}`的下载任务"));
         };
+        let _deletion_guard = task.deletion_lock.try_lock().wrap_err("下载任务正在删除")?;
+        if task.process_finished() {
+            return Err(eyre!("下载任务已取消，请重新创建下载任务"));
+        }
         task.set_state(DownloadTaskState::Pending);
         Ok(())
     }
 
     #[instrument(level = "error", skip_all, fields(chapter_id = chapter_id))]
     pub fn delete_download_task(&self, chapter_id: i64) -> eyre::Result<RemovedDownloadTask> {
-        let task = {
-            let mut tasks = self.download_tasks.write();
-            tasks
-                .remove(&chapter_id)
-                .ok_or_eyre(format!("未找到章节ID为`{chapter_id}`的下载任务"))?
-        };
+        let tasks = self.download_tasks.read();
+        let task = tasks
+            .get(&chapter_id)
+            .ok_or_eyre(format!("未找到章节ID为`{chapter_id}`的下载任务"))?;
+        let deletion_guard = task
+            .deletion_lock
+            .clone()
+            .try_lock_owned()
+            .wrap_err("下载任务正在删除")?;
+        task.paths.validate()?;
         task.set_state(DownloadTaskState::Cancelled);
-        task.delete_sender
-            .send(())
-            .wrap_err(format!("通知章节ID为`{chapter_id}`的下载任务删除失败"))?;
-
-        let comic_download_dir = task
-            .comic
-            .comic_download_dir
-            .clone()
-            .ok_or_eyre("`comic_download_dir`字段为`None`")?;
-        let chapter_download_dir = task
-            .chapter_info
-            .chapter_download_dir
-            .clone()
-            .ok_or_eyre("`chapter_download_dir`字段为`None`")?;
-        let temp_download_dir = task
-            .chapter_info
-            .get_temp_download_dir()
-            .wrap_err("获取临时下载目录失败")?;
+        task.delete_sender.send_replace(());
 
         Ok(RemovedDownloadTask {
-            comic_download_dir,
-            chapter_download_dir,
-            temp_download_dir,
+            task: task.clone(),
+            _deletion_guard: deletion_guard,
+            download_dir: task.paths.root.clone(),
+            comic_download_dir: task.paths.comic.clone(),
+            chapter_download_dir: task.paths.chapter.clone(),
+            temp_download_dir: task.paths.temporary.clone(),
         })
+    }
+
+    /// 判断是否存在属于`comic_download_dir`的漫画且仍在进行中的下载任务
+    #[instrument(level = "error", skip_all)]
+    pub fn has_active_tasks_of_comic(
+        &self,
+        comic_download_dir: &Path,
+        except_chapter: i64,
+    ) -> bool {
+        let tasks = self.download_tasks.read();
+        tasks.values().any(|task| {
+            if task.chapter_info.chapter_id == except_chapter
+                || task.paths.comic != comic_download_dir
+            {
+                return false;
+            }
+            task.is_busy()
+        })
+    }
+
+    pub fn complete_delete_download_task(&self, chapter_id: i64) {
+        self.download_tasks.write().remove(&chapter_id);
+        let _ = DownloadEvent::TaskDelete { chapter_id }.emit(&self.app);
+    }
+
+    pub fn chapter_ids_of_comic(&self, comic_dir: &Path) -> Vec<i64> {
+        self.download_tasks
+            .read()
+            .iter()
+            .filter(|(_, task)| task.paths.comic == comic_dir)
+            .map(|(id, _)| *id)
+            .collect()
     }
 
     /// 取消下载任务(保留已下载的文件)
@@ -301,10 +314,9 @@ pub fn read_downloaded_imgs_from_dir(
             return Ok(Vec::new());
         }
         Err(err) => {
-            return Err(eyre::Report::from(err).wrap_err(format!(
-                "读取目录`{}`失败",
-                dir.display()
-            )));
+            return Err(
+                eyre::Report::from(err).wrap_err(format!("读取目录`{}`失败", dir.display()))
+            );
         }
     };
 
