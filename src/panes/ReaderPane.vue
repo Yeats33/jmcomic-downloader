@@ -11,6 +11,7 @@ import {
 } from '@phosphor-icons/vue'
 import { commands } from '../bindings.ts'
 import { useStore } from '../store.ts'
+import { NButton, NIcon, NSpin } from 'naive-ui'
 
 const store = useStore()
 
@@ -62,7 +63,7 @@ async function fetchChapterImgs() {
   try {
     const result = await commands.getChapterDownloadedImgs(readerComic.value, chapterId.value)
     if (result.status === 'error') {
-      errorMessage.value = result.error.err_message
+      errorMessage.value = result.error.message
       return
     }
 
@@ -135,7 +136,7 @@ async function openInFileManager() {
 
   const result = await commands.showPathInFileManager(downloadDir.value)
   if (result.status === 'error') {
-    errorMessage.value = result.error.err_message
+    errorMessage.value = result.error.message
   }
 }
 

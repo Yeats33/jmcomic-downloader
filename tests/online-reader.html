@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>Online reader fixture</title></head>
+<body><div id="app"></div>
+<script type="module">
+async function setup() {
+const callbacks = new Map()
+let callbackId = 1
+let sessionNumber = 0
+const sessions = new Set()
+const urls = new Set()
+const createUrl = URL.createObjectURL.bind(URL)
+const revokeUrl = URL.revokeObjectURL.bind(URL)
+URL.createObjectURL = (blob) => { const url = createUrl(blob); urls.add(url); return url }
+URL.revokeObjectURL = (url) => { urls.delete(url); revokeUrl(url) }
+window.readerQa = { requests: [], closed: [], urls, failPage: null, failOpen: false }
+const chapters = [101, 102, 103].map((chapterId, index) => ({ chapterId, chapterTitle: `第${index + 1}话 · 在线阅读测试`, order: index + 1, isDownloaded: false, isPdfExported: false, isCbzExported: false }))
+const comic = { id: 0, name: '在线阅读测试', chapterInfos: chapters, author: ['测试'], tags: [], works: [], actors: [], relatedList: [], addtime: '', description: '', total_views: '', likes: '', series_id: '', comment_total: '', liked: false, is_favorite: false, is_aids: false }
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const config = { username: '', password: '', downloadDir: '/fixture/download', exportDir: '/fixture/export', downloadFormat: 'Jpeg', dirFmt: '{comic_title}/{chapter_title}', proxyMode: 'System', proxyHost: '', proxyPort: 0, enableFileLogger: false, chapterConcurrency: 3, imgConcurrency: 20, apiDomainMode: 'Domain2', customApiDomain: '', shouldDownloadCover: false, enableMergePdf: true, createPdfConcurrency: 2, exportSkipMode: 'None' }
+window.__TAURI_INTERNALS__ = {
+  metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
+  transformCallback(callback) { const id = callbackId++; callbacks.set(id, callback); return id },
+  async invoke(command, args = {}) {
+    if (command === 'get_config') return config
+    if (command === 'save_config') return null
+    if (command === 'get_comic') return comic
+    if (command === 'get_downloaded_comics') return []
+    if (command === 'plugin:event|listen') return callbackId++
+    if (command === 'plugin:event|unlisten') return null
+    if (command === 'start_online_reader') { sessions.clear(); const id = `fixture-${++sessionNumber}`; sessions.add(id); return id }
+    if (command === 'close_online_reader') { sessions.delete(args.sessionId); window.readerQa.closed.push(args.sessionId); return null }
+    if (command === 'open_online_chapter') {
+      await wait(40)
+      if (!sessions.has(args.sessionId)) throw { err_title: '已取消', message: '在线阅读已关闭' }
+      if (window.readerQa.failOpen) throw { err_title: '网络错误', message: '章节加载失败，请重试' }
+      return { sessionId: args.sessionId, pageCount: args.chapterId === 102 ? 0 : 6 }
+    }
+    if (command === 'stream_online_page') {
+      window.readerQa.requests.push({ session: args.sessionId, page: args.pageIndex })
+      if (window.readerQa.failPage === args.pageIndex) throw { err_title: '网络错误', message: '页面加载失败，请重试' }
+      const canvas = document.createElement('canvas')
+      canvas.width = 420; canvas.height = 600
+      const context = canvas.getContext('2d')
+      context.fillStyle = '#dce9ef'; context.fillRect(0, 0, 420, 600)
+      context.fillStyle = '#1c3b4a'; context.font = '28px system-ui'; context.fillText(`Online page ${args.pageIndex + 1}`, 60, 140)
+      context.fillStyle = '#8aafbc'; context.fillRect(60, 200, 300, 240)
+      const bytes = Uint8Array.from(atob(canvas.toDataURL('image/png').split(',')[1]), (char) => char.charCodeAt(0))
+      let messageId = 0
+      const emit = (message) => callbacks.get(args.onChunk.id)?.({ message, id: messageId++ })
+      for (let offset = 0; offset < bytes.length; offset += 1024) {
+        await wait(25)
+        if (!sessions.has(args.sessionId)) throw { err_title: '已取消', message: '在线阅读已关闭' }
+        emit({ event: 'Chunk', data: Array.from(bytes.slice(offset, offset + 1024)) })
+      }
+      emit({ event: 'Complete', data: { mime: 'image/png', blocks: 0 } })
+      return null
+    }
+    throw new Error(`Unexpected fixture command: ${command}`)
+  },
+}
+await import('/src/main.ts')
+const { useStore } = await import('/src/store.ts')
+window.readerQa.store = useStore()
+window.readerQa.store.pickedComic = comic
+window.readerQa.store.currentTabName = 'chapter'
+}
+void setup().catch((error) => { document.body.textContent = String(error); console.error(error) })
+</script>
+</body></html>

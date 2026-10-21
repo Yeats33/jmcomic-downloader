@@ -42,9 +42,9 @@ https://github.com/user-attachments/assets/46096bd9-1fde-4474-b297-0f4389dbe770
 - 如果你在使用这个 fork 时遇到问题，请前往[Issues 页面](https://github.com/Yeats33/jmcomic-downloader/issues)反馈
 - 如果你想查看上游项目沉淀的历史讨论，请前往[上游仓库](https://github.com/lanyeeee/jmcomic-downloader)
 
-# 📚 哔咔漫画下载器  
+# 📚 哔咔漫画下载器
 
-[![Readme Card](https://github-readme-stats-lemon-chi-98.vercel.app/api/pin/?username=lanyeeee&repo=picacomic-downloader)](https://github.com/lanyeeee/picacomic-downloader)  
+[![picacomic-downloader](https://github-readme-stats-fast.vercel.app/api/pin/?username=lanyeeee&repo=picacomic-downloader)](https://github.com/lanyeeee/picacomic-downloader)
 
 # ⚠️ 关于被杀毒软件误判为病毒
 
@@ -53,6 +53,12 @@ https://github.com/user-attachments/assets/46096bd9-1fde-4474-b297-0f4389dbe770
 
 1. 根据下面的**如何构建(build)**，自行编译
 2. 希望你相信我的承诺，我承诺你在[Release页面](https://github.com/Yeats33/jmcomic-downloader/releases)下载到的所有东西都是安全的。切勿轻信他人分享的文件，请**仅**在[Release页面](https://github.com/Yeats33/jmcomic-downloader/releases)下载。任何不是从该页面下载的版本均可能**已被篡改**并**真的包含病毒**(而非误报)，包括但不限于`网盘`、`通过邮箱或社交软件分享`、`issue或discussion里的文件`、`其他fork(仓库)`、`其他网站`
+
+# 在线阅读
+
+在章节详情中选择「在线阅读」，点击章节即可开始。图片逐页通过网络分块传输，支持翻页、章节切换、缩放和失败重试，无需创建下载任务。
+
+阅读器只在内存中保留当前页及相邻页；关闭或切换章节会取消旧请求并释放缓存。需要重排的图片会在一页接收完整后还原显示，GIF 保留动画。原有的本地阅读、下载和导出入口仍可使用。
 
 # 🛠️ 如何构建(build)
 
@@ -109,4 +115,4 @@ pnpm tauri build
 
 # 💬 其他
 
-任何使用中遇到的问题、任何希望添加的功能，都欢迎提交issue或开discussion交流，我会尽力解决  
+任何使用中遇到的问题、任何希望添加的功能，都欢迎提交issue或开discussion交流，我会尽力解决
