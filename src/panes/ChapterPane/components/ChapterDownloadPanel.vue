@@ -232,6 +232,7 @@ const ChapterCheckbox = defineComponent({
       <n-radio-group v-model:value="chapterPaneMode" size="small">
         <n-radio-button value="download">下载</n-radio-button>
         <n-radio-button value="export">导出</n-radio-button>
+        <n-radio-button value="read">在线阅读</n-radio-button>
       </n-radio-group>
       <n-button class="ml-auto" size="small" @click="props.reload">刷新</n-button>
       <n-button size="small" type="primary" @click="downloadCheckedChapters">下载勾选章节</n-button>

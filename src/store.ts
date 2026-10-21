@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { CurrentTabName, ProgressData, ProgressesPaneTabName } from './types.ts'
-import { Comic, Config, GetFavoriteResult, GetUserProfileRespData, GetWeeklyResult, SearchResult } from './bindings.ts'
+import { ChapterInfo, Comic, Config, GetFavoriteResult, GetUserProfileRespData, GetWeeklyResult, SearchResult } from './bindings.ts'
 import { ref } from 'vue'
 
 export const useStore = defineStore('store', () => {
@@ -17,6 +17,8 @@ export const useStore = defineStore('store', () => {
   const readerChapterId = ref<number | null>(null)
   const readerChapterTitle = ref('')
   const downloadedComics = ref<Comic[]>([])
+  const onlineReaderComic = ref<Comic | null>(null)
+  const onlineReaderChapter = ref<ChapterInfo | null>(null)
 
   return {
     config,
@@ -32,5 +34,7 @@ export const useStore = defineStore('store', () => {
     readerChapterId,
     readerChapterTitle,
     downloadedComics,
+    onlineReaderComic,
+    onlineReaderChapter,
   }
 })

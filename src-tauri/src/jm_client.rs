@@ -595,6 +595,11 @@ impl JmClient {
 
         Ok((image_data, format))
     }
+
+    pub(crate) fn image_request(&self, url: &str) -> reqwest_middleware::RequestBuilder {
+        self.img_client.read().get(url)
+            .header("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+    }
 }
 
 pub fn create_api_client(app: &AppHandle, jar: &Arc<Jar>) -> ClientWithMiddleware {

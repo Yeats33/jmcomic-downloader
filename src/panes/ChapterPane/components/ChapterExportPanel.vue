@@ -263,6 +263,7 @@ const ChapterCheckbox = defineComponent({
       <n-radio-group v-model:value="chapterPaneMode" size="small">
         <n-radio-button value="download">下载</n-radio-button>
         <n-radio-button value="export">导出</n-radio-button>
+        <n-radio-button value="read">在线阅读</n-radio-button>
       </n-radio-group>
       <n-popover placement="bottom" trigger="hover" raw>
         <template #trigger>

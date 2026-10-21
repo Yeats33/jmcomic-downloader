@@ -94,6 +94,28 @@ async getChapterDownloadedImgs(comic: Comic, chapterId: number) : Promise<Result
     else return { status: "error", error: e  as any };
 }
 },
+async openOnlineChapter(sessionId: string, chapterId: number) : Promise<Result<OnlineChapter, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_online_chapter", { sessionId, chapterId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async startOnlineReader() : Promise<string> {
+    return await TAURI_INVOKE("start_online_reader");
+},
+async streamOnlinePage(sessionId: string, pageIndex: number, onChunk: TAURI_CHANNEL<OnlinePageEvent>) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stream_online_page", { sessionId, pageIndex, onChunk }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async closeOnlineReader(sessionId: string) : Promise<void> {
+    await TAURI_INVOKE("close_online_reader", { sessionId });
+},
 async pauseDownloadTask(chapterId: number) : Promise<Result<null, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("pause_download_task", { chapterId }) };
@@ -354,6 +376,8 @@ export type LogEvent = { jsonRaw: string }
 export type LogLevel = "TRACE" | "DEBUG" | "INFO" | "WARN" | "ERROR"
 export type LogMetadata = { timestamp: string; level: LogLevel; fields: { [key in string]: JsonValue }; target: string; filename: string; line_number: number; span?: JsonValue; spans?: LogSpan[] }
 export type LogSpan = ({ [key in string]: null | boolean | number | string | JsonValue[] | { [key in string]: JsonValue } }) & { name: string }
+export type OnlineChapter = { sessionId: string; pageCount: number }
+export type OnlinePageEvent = { event: "Chunk"; data: number[] } | { event: "Complete"; data: { mime: string; blocks: number } }
 export type ProxyMode = "System" | "NoProxy" | "Custom"
 export type RelatedListRespData = { id: string; author: string; name: string; image: string }
 export type SearchResult = { searchQuery: string; total: number; content: ComicInSearch[] }
