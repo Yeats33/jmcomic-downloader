@@ -37,6 +37,7 @@ pub struct Config {
     pub enable_merge_pdf: bool,
     /// 导出跳过模式
     pub export_skip_mode: ExportSkipMode,
+    pub online_reader_prefetch_pages: usize,
 }
 
 impl Config {
@@ -129,6 +130,37 @@ impl Config {
             create_pdf_concurrency: cpu_core_num,
             enable_merge_pdf: true,
             export_skip_mode: ExportSkipMode::default(),
+            online_reader_prefetch_pages: 1,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_config_gains_reader_buffer_without_resetting_settings() {
+        let config = Config::merge_config(
+            r#"{"username":"reader","imgConcurrency":7}"#,
+            Path::new("/fixture"),
+        );
+
+        assert_eq!(config.online_reader_prefetch_pages, 1);
+        assert_eq!(config.username, "reader");
+        assert_eq!(config.img_concurrency, 7);
+    }
+
+    #[test]
+    fn reader_buffer_survives_config_serialization() {
+        for pages in [0, 5, 50] {
+            let mut config = Config::default(Path::new("/fixture"));
+            config.online_reader_prefetch_pages = pages;
+
+            let json = serde_json::to_string(&config).unwrap();
+            let restored: Config = serde_json::from_str(&json).unwrap();
+
+            assert_eq!(restored.online_reader_prefetch_pages, pages);
         }
     }
 }

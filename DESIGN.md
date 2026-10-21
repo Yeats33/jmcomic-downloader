@@ -13,7 +13,7 @@ Retain the system sans-serif stack. Use 14px body text, existing small control l
 Use the existing 4px spacing unit. Toolbars wrap on narrow windows; scrolling belongs to the page canvas or chapter list. Reader controls remain visible above and below the canvas, with a full-height overlay.
 
 ## 5. Components and states
-Reuse NButton, NRadioGroup/NRadioButton, NSelect, NSpin and NAlert. Online reading is a third chapter mode alongside downloading and exporting. A chapter opens from its own reading button. Show page position, incoming bytes, loading, retry and empty states. Local reading keeps its existing controls.
+Reuse NButton, NRadioGroup/NRadioButton, NSelect, NInputNumber, NSpin and NAlert. Online reading is a third chapter mode alongside downloading and exporting. A chapter opens from its own reading button. Show page position, incoming bytes, loading, retry and empty states. The online reader toolbar includes a labeled forward-buffer page count from 0 to 50, with 0 disabling preloading and 1 as the default. Changes apply immediately and use the existing automatic configuration saving. Local reading keeps its existing controls.
 
 ## 6. Interaction
 Retain arrow-key paging, Escape to close, and zoom controls. Ignore reader shortcuts while typing or choosing a chapter. Respect reduced motion. Closing or switching chapters cancels obsolete transfers and releases image object URLs.
@@ -22,4 +22,4 @@ Retain arrow-key paging, Escape to close, and zoom controls. Ignore reader short
 Name icon-only controls, expose loading/error status, retain keyboard focus indicators and useful image alt text. Page controls are disabled at boundaries. At narrow widths, controls wrap instead of overflowing.
 
 ## 8. Accepted constraints
-This is an extension of the existing Vue/Naive UI app, not a visual redesign. Online pages arrive on demand through Tauri channels; scrambled images require a complete page before reconstruction. Keep only the current page and adjacent pages in memory.
+This is an extension of the existing Vue/Naive UI app, not a visual redesign. Online pages arrive on demand through Tauri channels; scrambled images require a complete page before reconstruction. Keep the current page, the previous page, and the configured number of following pages in memory. Load following pages sequentially so a larger buffer does not queue a whole chapter ahead of the current page.

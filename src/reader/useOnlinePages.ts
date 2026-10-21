@@ -1,10 +1,11 @@
 import { Channel } from '@tauri-apps/api/core'
-import { onUnmounted, ref } from 'vue'
+import { onUnmounted, ref, watch } from 'vue'
+import type { Ref } from 'vue'
 import { commands } from '../bindings.ts'
 import type { OnlinePageEvent } from '../bindings.ts'
 import { onlineImageUrl } from './onlineImages.ts'
 
-export function useOnlinePages() {
+export function useOnlinePages(prefetchPages: Readonly<Ref<number>>) {
   const currentPage = ref(1)
   const pageCount = ref(0)
   const imageUrl = ref('')
@@ -15,6 +16,17 @@ export function useOnlinePages() {
   const pending = new Map<number, Promise<string>>()
   let generation = 0
   let sessionId: string | null = null
+
+  function shouldCachePage(index: number) {
+    const currentIndex = currentPage.value - 1
+    return index >= currentIndex - 1 && index <= currentIndex + prefetchPages.value
+  }
+
+  function trimCache() {
+    for (const [index, url] of cache) {
+      if (!shouldCachePage(index)) { URL.revokeObjectURL(url); cache.delete(index) }
+    }
+  }
 
   function clear() {
     generation++
@@ -57,7 +69,7 @@ export function useOnlinePages() {
         if (result.status === 'error') reject(new Error(result.error.message))
       }, reject)
     }).then((url) => {
-      if (version === generation && Math.abs(index - (currentPage.value - 1)) <= 1) {
+      if (version === generation && shouldCachePage(index)) {
         cache.set(index, url)
         return url
       }
@@ -72,6 +84,19 @@ export function useOnlinePages() {
     return transfer
   }
 
+  async function prefetch() {
+    const version = generation
+    const page = currentPage.value
+    for (let index = page; index < Math.min(pageCount.value, page + prefetchPages.value); index++) {
+      if (version !== generation || currentPage.value !== page) return
+      try {
+        await fetchPage(index)
+      } catch (cause) {
+        console.debug('页面预加载失败', cause)
+      }
+    }
+  }
+
   async function showPage(page: number) {
     if (page < 1 || page > pageCount.value) return
     currentPage.value = page
@@ -79,15 +104,13 @@ export function useOnlinePages() {
     error.value = ''
     imageUrl.value = ''
     receivedBytes.value = 0
+    trimCache()
     const version = generation
     try {
       const url = await fetchPage(page - 1)
       if (version !== generation || currentPage.value !== page) return
       imageUrl.value = url
-      for (const [index, cached] of cache) {
-        if (Math.abs(index - (page - 1)) > 1) { URL.revokeObjectURL(cached); cache.delete(index) }
-      }
-      if (page < pageCount.value) void fetchPage(page).catch((cause: unknown) => console.debug('下一页预加载失败', cause))
+      void prefetch()
     } catch (cause) {
       if (version === generation) error.value = cause instanceof Error ? cause.message : String(cause)
     } finally {
@@ -127,6 +150,11 @@ export function useOnlinePages() {
     imageUrl.value = ''
     error.value = '图片显示失败，请重试'
   }
+
+  watch(prefetchPages, () => {
+    trimCache()
+    if (imageUrl.value !== '') void prefetch()
+  })
 
   onUnmounted(clear)
   return { currentPage, pageCount, imageUrl, loading, error, receivedBytes, showPage, openChapter, invalidatePage }

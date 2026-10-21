@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NButton, NSelect, NSpin } from 'naive-ui'
+import { NButton, NInputNumber, NSelect, NSpin } from 'naive-ui'
 import { useStore } from '../store.ts'
 import { useOnlinePages } from '../reader/useOnlinePages.ts'
 
 const store = useStore()
-const { currentPage, pageCount, imageUrl, loading, error, receivedBytes, showPage, openChapter, invalidatePage } = useOnlinePages()
+const prefetchPages = computed(() => store.config?.onlineReaderPrefetchPages ?? 1)
+const { currentPage, pageCount, imageUrl, loading, error, receivedBytes, showPage, openChapter, invalidatePage } = useOnlinePages(prefetchPages)
 const scale = ref(100)
 const panel = ref<HTMLElement | null>(null)
 let previousFocus: HTMLElement | null = null
@@ -13,6 +14,9 @@ const chapters = computed(() => store.onlineReaderComic?.chapterInfos ?? [])
 const chapterOptions = computed(() => chapters.value.map((chapter) => ({ label: chapter.chapterTitle, value: chapter.chapterId })))
 const chapterId = computed(() => store.onlineReaderChapter?.chapterId ?? null)
 const chapterIndex = computed(() => chapters.value.findIndex((chapter) => chapter.chapterId === chapterId.value))
+function updatePrefetchPages(value: number | null) {
+  if (value !== null && store.config !== undefined) store.config.onlineReaderPrefetchPages = value
+}
 function selectChapter(id: number) {
   const chapter = chapters.value.find((chapter) => chapter.chapterId === id)
   if (chapter !== undefined) store.onlineReaderChapter = chapter
@@ -58,6 +62,19 @@ onUnmounted(() => { window.removeEventListener('keydown', keydown); previousFocu
       <span class="font-semibold text-sm">在线阅读</span>
       <n-select class="min-w-0 w-64 max-w-full" size="small" :value="chapterId" :options="chapterOptions" aria-label="选择章节" @update:value="selectChapter" />
       <span class="text-gray-3 text-sm whitespace-nowrap">{{ currentPage }} / {{ pageCount || '—' }} 页</span>
+      <div class="flex items-center gap-1 text-sm whitespace-nowrap" title="提前加载后续页面，0 为关闭；修改后自动保存">
+        <label for="online-reader-prefetch">向前缓冲</label>
+        <n-input-number
+          class="w-24"
+          size="small"
+          :value="prefetchPages"
+          :min="0"
+          :max="50"
+          :precision="0"
+          :input-props="{ id: 'online-reader-prefetch', 'aria-label': '向前缓冲页数' }"
+          @update:value="updatePrefetchPages" />
+        <span class="text-gray-3">页</span>
+      </div>
       <n-button size="small" class="ml-auto text-white!" quaternary aria-label="关闭在线阅读" @click="close">关闭</n-button>
     </header>
     <div class="flex-1 min-h-0 overflow-auto p-4 flex" :aria-busy="loading">
