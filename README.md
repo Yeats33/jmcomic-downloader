@@ -42,9 +42,9 @@ https://github.com/user-attachments/assets/46096bd9-1fde-4474-b297-0f4389dbe770
 - 如果你在使用这个 fork 时遇到问题，请前往[Issues 页面](https://github.com/Yeats33/jmcomic-downloader/issues)反馈
 - 如果你想查看上游项目沉淀的历史讨论，请前往[上游仓库](https://github.com/lanyeeee/jmcomic-downloader)
 
-# 📚 哔咔漫画下载器  
+# 📚 哔咔漫画下载器
 
-[![Readme Card](https://github-readme-stats-lemon-chi-98.vercel.app/api/pin/?username=lanyeeee&repo=picacomic-downloader)](https://github.com/lanyeeee/picacomic-downloader)  
+[![picacomic-downloader](https://github-readme-stats-fast.vercel.app/api/pin/?username=lanyeeee&repo=picacomic-downloader)](https://github.com/lanyeeee/picacomic-downloader)
 
 # ⚠️ 关于被杀毒软件误判为病毒
 
@@ -109,4 +109,4 @@ pnpm tauri build
 
 # 💬 其他
 
-任何使用中遇到的问题、任何希望添加的功能，都欢迎提交issue或开discussion交流，我会尽力解决  
+任何使用中遇到的问题、任何希望添加的功能，都欢迎提交issue或开discussion交流，我会尽力解决
