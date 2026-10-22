@@ -26,6 +26,7 @@ window.__TAURI_INTERNALS__ = {
     if (command === 'save_config') { localStorage.setItem('reader-buffer-pages', String(args.config.onlineReaderPrefetchPages)); return null }
     if (command === 'get_comic') return comic
     if (command === 'get_downloaded_comics') return []
+    if (command === 'restore_download_queue') return null
     if (command === 'get_weekly_info') return { categories: [{ id: 'fixture', title: '测试', time: '测试周期' }], type: [{ id: 'fixture', title: '测试' }] }
     if (command === 'get_weekly') return { total: 0, list: [] }
     if (command === 'get_logs_dir_size') return 0

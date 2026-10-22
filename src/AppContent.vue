@@ -46,17 +46,21 @@ onMounted(async () => {
   document.oncontextmenu = (event) => {
     event.preventDefault()
   }
-  // 获取配置
-  store.config = await commands.getConfig()
-  // 如果username和password不为空，尝试登录
-  if (store.config.username !== '' && store.config.password !== '') {
-    const result = await commands.login(store.config.username, store.config.password)
-    if (result.status === 'error') {
-      console.error(result.error)
-      return
+  try {
+    // 获取配置
+    store.config = await commands.getConfig()
+    // 如果username和password不为空，尝试登录
+    if (store.config.username !== '' && store.config.password !== '') {
+      const result = await commands.login(store.config.username, store.config.password)
+      if (result.status === 'error') {
+        console.error(result.error)
+        return
+      }
+      store.userProfile = result.data
+      message.success('自动登录成功')
     }
-    store.userProfile = result.data
-    message.success('自动登录成功')
+  } finally {
+    store.startupReady = true
   }
 })
 </script>

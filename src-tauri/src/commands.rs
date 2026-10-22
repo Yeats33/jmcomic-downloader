@@ -272,6 +272,14 @@ pub fn create_download_tasks(app: AppHandle, comic: Comic, chapter_ids: Vec<i64>
     download_manager.create_download_tasks(comic, &chapter_ids);
 }
 
+#[tauri::command(async)]
+#[specta::specta]
+pub fn restore_download_queue(app: AppHandle) -> CommandResult<()> {
+    app.get_download_manager()
+        .restore_download_queue()
+        .map_err(|error| CommandError::from("恢复下载队列失败", error))
+}
+
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command(async)]
 #[specta::specta]

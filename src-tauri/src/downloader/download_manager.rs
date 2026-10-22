@@ -17,6 +17,7 @@ use tauri_specta::Event;
 use tokio::sync::{Mutex, OwnedMutexGuard, Semaphore};
 use tracing::instrument;
 
+use super::queue::DownloadQueue;
 use crate::{
     config::Config,
     downloader::{download_task::DownloadTask, download_task_state::DownloadTaskState},
@@ -52,10 +53,12 @@ pub struct DownloadManager {
     pub img_sem: Arc<Semaphore>,
     pub byte_per_sec: Arc<AtomicU64>,
     pub download_tasks: RwLock<HashMap<i64, Arc<DownloadTask>>>,
+    queue: Result<Arc<DownloadQueue>, String>,
+    restored: parking_lot::Mutex<bool>,
 }
 
 impl DownloadManager {
-    pub fn new(app: &AppHandle) -> Self {
+    pub fn new(app: &AppHandle, app_data_dir: &Path) -> Self {
         let (chapter_concurrency, img_concurrency) = {
             let config = app.state::<RwLock<Config>>();
             let config = config.read();
@@ -69,6 +72,10 @@ impl DownloadManager {
             img_sem: Arc::new(Semaphore::new(img_concurrency)),
             byte_per_sec: Arc::new(AtomicU64::new(0)),
             download_tasks: RwLock::new(HashMap::new()),
+            queue: DownloadQueue::open(app_data_dir.join("download-queue.json"))
+                .map(Arc::new)
+                .map_err(|error| format!("{error:?}")),
+            restored: parking_lot::Mutex::new(false),
         };
 
         tauri::async_runtime::spawn(Self::emit_download_speed_loop(
@@ -77,6 +84,44 @@ impl DownloadManager {
         ));
 
         manager
+    }
+
+    pub(super) fn queue(&self) -> eyre::Result<&Arc<DownloadQueue>> {
+        self.queue.as_ref().map_err(|error| eyre!("{error}"))
+    }
+
+    pub fn restore_download_queue(&self) -> eyre::Result<()> {
+        let mut restored = self.restored.lock();
+        let queue = self.queue()?;
+        let mut tasks = self.download_tasks.write();
+        let mut errors = Vec::new();
+        if !*restored {
+            for mut entry in queue.entries() {
+                if tasks.contains_key(&entry.chapter_id) {
+                    continue;
+                }
+                let Some(state) = entry.restored_state() else {
+                    continue;
+                };
+                entry.state = state;
+                let chapter_id = entry.chapter_id;
+                match DownloadTask::from_queue(self.app.clone(), entry) {
+                    Ok(task) => {
+                        tasks.insert(chapter_id, task);
+                    }
+                    Err(error) => errors.push(format!("章节 {chapter_id}: {error:?}")),
+                }
+            }
+            *restored = errors.is_empty();
+        }
+        for task in tasks.values() {
+            task.emit_download_task_create_event();
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(eyre!("部分下载任务恢复失败：{}", errors.join("；")))
+        }
     }
 
     #[instrument(
@@ -181,7 +226,7 @@ impl DownloadManager {
         let Some(task) = tasks.get(&chapter_id) else {
             return Err(eyre!("未找到章节ID为`{chapter_id}`的下载任务"));
         };
-        task.set_state(DownloadTaskState::Paused);
+        task.change_state(DownloadTaskState::Paused)?;
         Ok(())
     }
 
@@ -195,7 +240,7 @@ impl DownloadManager {
         if task.process_finished() {
             return Err(eyre!("下载任务已取消，请重新创建下载任务"));
         }
-        task.set_state(DownloadTaskState::Pending);
+        task.change_state(DownloadTaskState::Pending)?;
         Ok(())
     }
 
@@ -211,7 +256,7 @@ impl DownloadManager {
             .try_lock_owned()
             .wrap_err("下载任务正在删除")?;
         task.paths.validate()?;
-        task.set_state(DownloadTaskState::Cancelled);
+        task.change_state(DownloadTaskState::Cancelled)?;
         task.delete_sender.send_replace(());
 
         Ok(RemovedDownloadTask {
@@ -263,7 +308,7 @@ impl DownloadManager {
         let Some(task) = tasks.get(&chapter_id) else {
             return Err(eyre!("未找到章节ID为`{chapter_id}`的下载任务"));
         };
-        task.set_state(DownloadTaskState::Cancelled);
+        task.change_state(DownloadTaskState::Cancelled)?;
         Ok(())
     }
 

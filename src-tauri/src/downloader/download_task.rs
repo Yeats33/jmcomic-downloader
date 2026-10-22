@@ -17,6 +17,7 @@ use tokio::{
 };
 use tracing::{instrument, Instrument};
 
+use super::queue::{DownloadQueue, QueueCheckpoint, QueuedDownload};
 use crate::{
     downloader::{
         download_img_task::{calculate_block_num, DownloadImgTask},
@@ -28,7 +29,7 @@ use crate::{
     events::DownloadEvent,
     extensions::{AppHandleExt, EyreReportToMessage},
     jm_client::IMAGE_DOMAIN,
-    types::{ChapterInfo, Comic},
+    types::{ChapterInfo, Comic, DownloadFormat},
 };
 
 pub struct DownloadTask {
@@ -43,6 +44,10 @@ pub struct DownloadTask {
     pub(super) image_writes: ImageWrites,
     pub(super) deletion_lock: Arc<Mutex<()>>,
     process_finished: watch::Receiver<()>,
+    pub(super) download_format: DownloadFormat,
+    task_id: String,
+    queue: Arc<DownloadQueue>,
+    state_change: parking_lot::Mutex<()>,
 }
 
 impl DownloadTask {
@@ -60,6 +65,29 @@ impl DownloadTask {
             .ensure_download_dir_fields(&app)
             .wrap_err("更新下载目录字段失败")?;
 
+        let (root, format) = {
+            let config = app.get_config();
+            let config = config.read();
+            (config.download_dir.clone(), config.download_format)
+        };
+        Self::from_queue(
+            app,
+            QueuedDownload {
+                task_id: uuid::Uuid::new_v4().to_string(),
+                comic,
+                chapter_id,
+                root,
+                format,
+                state: DownloadTaskState::Pending,
+                total_img_count: 0,
+            },
+        )
+    }
+
+    pub(super) fn from_queue(app: AppHandle, entry: QueuedDownload) -> eyre::Result<Arc<Self>> {
+        let comic = entry.comic.clone();
+        let chapter_id = entry.chapter_id;
+
         let chapter_info = comic
             .chapter_infos
             .iter()
@@ -67,10 +95,42 @@ impl DownloadTask {
             .cloned()
             .ok_or_eyre(format!("未找到章节ID为`{chapter_id}`的章节信息"))?;
 
-        let (state_sender, _) = watch::channel(DownloadTaskState::Pending);
+        let paths = DownloadPaths::new(&entry.root, &comic, &chapter_info)?;
+        let queue = Arc::clone(app.get_download_manager().queue()?);
+        let metadata_path = paths.chapter.join("章节元数据.json");
+        let already_complete = match std::fs::read(&metadata_path) {
+            Ok(bytes) => serde_json::from_slice::<ChapterInfo>(&bytes)
+                .is_ok_and(|saved| saved.chapter_id == chapter_id),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => return Err(error.into()),
+        };
+        let state = if already_complete {
+            DownloadTaskState::Completed
+        } else {
+            entry.state
+        };
+        let downloaded_dir = if already_complete {
+            &paths.chapter
+        } else {
+            &paths.temporary
+        };
+        let downloaded_count =
+            u32::try_from(read_downloaded_imgs_from_dir(downloaded_dir, true)?.len())?;
+        queue.insert(QueuedDownload {
+            comic: comic.clone(),
+            state,
+            ..entry.clone()
+        })?;
+        if already_complete {
+            queue.update(QueueCheckpoint {
+                task_id: &entry.task_id,
+                chapter_id,
+                state,
+                total_img_count: downloaded_count,
+            })?;
+        }
+        let (state_sender, _) = watch::channel(state);
         let (delete_sender, _) = watch::channel(());
-        let download_root = app.get_config().read().download_dir.clone();
-        let paths = DownloadPaths::new(&download_root, &comic, &chapter_info)?;
         let (finished_sender, process_finished) = watch::channel(());
 
         let task = Arc::new(Self {
@@ -79,12 +139,20 @@ impl DownloadTask {
             chapter_info: Arc::new(chapter_info),
             state_sender,
             delete_sender,
-            downloaded_img_count: Arc::new(AtomicU32::new(0)),
-            total_img_count: Arc::new(AtomicU32::new(0)),
+            downloaded_img_count: Arc::new(AtomicU32::new(downloaded_count)),
+            total_img_count: Arc::new(AtomicU32::new(if already_complete {
+                downloaded_count
+            } else {
+                entry.total_img_count
+            })),
             paths,
             image_writes: ImageWrites::new(),
             deletion_lock: Arc::new(Mutex::new(())),
             process_finished,
+            download_format: entry.format,
+            task_id: entry.task_id,
+            queue,
+            state_change: parking_lot::Mutex::new(()),
         });
 
         let process_task = task.clone();
@@ -209,9 +277,14 @@ impl DownloadTask {
             return;
         };
 
-        #[allow(clippy::cast_possible_truncation)]
-        self.total_img_count
-            .fetch_add(urls_with_block_num.len() as u32, Ordering::Relaxed);
+        let Ok(total) = u32::try_from(urls_with_block_num.len()) else {
+            self.set_state(DownloadTaskState::Failed);
+            self.emit_download_task_update_event();
+            return;
+        };
+        self.total_img_count.store(total, Ordering::Relaxed);
+        self.downloaded_img_count.store(0, Ordering::Relaxed);
+        self.set_state(DownloadTaskState::Downloading);
 
         let Some(temp_download_dir) = self.create_temp_download_dir() else {
             return;
@@ -402,7 +475,7 @@ impl DownloadTask {
             }
         };
 
-        let download_format = self.app.get_config().read().download_format;
+        let download_format = self.download_format;
         let extension = download_format.extension();
         for path in entries.filter_map(Result::ok).map(|entry| entry.path()) {
             let should_keep = path
@@ -457,11 +530,7 @@ impl DownloadTask {
             return;
         }
 
-        if let Err(err) = self
-            .state_sender
-            .send(DownloadTaskState::Downloading)
-            .map_err(eyre::Report::from)
-        {
+        if let Err(err) = self.change_state(DownloadTaskState::Downloading) {
             let err_title = "发送状态`Downloading`失败";
             let message = err.to_message();
             tracing::error!(err_title, message);
@@ -526,7 +595,22 @@ impl DownloadTask {
         )
     )]
     pub fn set_state(&self, state: DownloadTaskState) {
+        if let Err(error) = self.change_state(state) {
+            tracing::error!(err_title = "保存下载队列失败", message = %error);
+            self.state_sender.send_replace(state);
+        }
+    }
+
+    pub(super) fn change_state(&self, state: DownloadTaskState) -> eyre::Result<()> {
+        let _guard = self.state_change.lock();
+        self.queue.update(QueueCheckpoint {
+            task_id: &self.task_id,
+            chapter_id: self.chapter_info.chapter_id,
+            state,
+            total_img_count: self.total_img_count.load(Ordering::Relaxed),
+        })?;
         self.state_sender.send_replace(state);
+        Ok(())
     }
 
     /// 获取当前任务中已下载的图片信息(供阅读模式使用)
@@ -582,7 +666,7 @@ impl DownloadTask {
         .emit(&self.app);
     }
 
-    fn emit_download_task_create_event(&self) {
+    pub(super) fn emit_download_task_create_event(&self) {
         let _ = DownloadEvent::TaskCreate {
             state: *self.state_sender.borrow(),
             comic: Box::new(self.comic.as_ref().clone()),

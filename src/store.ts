@@ -5,6 +5,7 @@ import { ref } from 'vue'
 
 export const useStore = defineStore('store', () => {
   const config = ref<Config>()
+  const startupReady = ref(false)
   const userProfile = ref<GetUserProfileRespData>()
   const pickedComic = ref<Comic>()
   const currentTabName = ref<CurrentTabName>('search')
@@ -22,6 +23,7 @@ export const useStore = defineStore('store', () => {
 
   return {
     config,
+    startupReady,
     userProfile,
     pickedComic,
     currentTabName,

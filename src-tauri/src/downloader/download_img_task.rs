@@ -107,7 +107,7 @@ impl DownloadImgTask {
         let url = &self.url;
 
         let index_filename = format!("{:04}", self.index + 1);
-        let download_format = self.app.get_config().read().download_format;
+        let download_format = self.download_task.download_format;
         let extension = download_format.extension();
 
         let user_format_path = self

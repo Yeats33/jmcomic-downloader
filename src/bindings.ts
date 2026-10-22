@@ -86,6 +86,14 @@ async createDownloadTask(comic: Comic, chapterId: number) : Promise<Result<null,
 async createDownloadTasks(comic: Comic, chapterIds: number[]) : Promise<void> {
     await TAURI_INVOKE("create_download_tasks", { comic, chapterIds });
 },
+async restoreDownloadQueue() : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("restore_download_queue") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async getChapterDownloadedImgs(comic: Comic, chapterId: number) : Promise<Result<ChapterDownloadedImgs, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_chapter_downloaded_imgs", { comic, chapterId }) };

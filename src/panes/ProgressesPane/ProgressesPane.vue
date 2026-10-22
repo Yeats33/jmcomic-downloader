@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
+import type { WatchStopHandle } from 'vue'
 import { commands, events } from '../../bindings.ts'
+import type { DownloadTaskState } from '../../bindings.ts'
 import { open } from '@tauri-apps/plugin-dialog'
 import { PhFolderOpen, PhGearSix } from '@phosphor-icons/vue'
 import { useStore } from '../../store.ts'
@@ -9,13 +11,43 @@ import UncompletedProgresses from './components/UncompletedProgresses.vue'
 import CompletedProgresses from './components/CompletedProgresses.vue'
 import { ProgressData } from '../../types.ts'
 import ExportProgresses from './components/ExportProgresses.vue'
-import { NButton, NIcon, NInput, NInputGroup, NInputGroupLabel, NTabPane, NTabs } from 'naive-ui'
+import { NAlert, NButton, NIcon, NInput, NInputGroup, NInputGroupLabel, NTabPane, NTabs } from 'naive-ui'
 
 const store = useStore()
 
 const settingsDialogShowing = ref<boolean>(false)
 
 const downloadSpeed = ref<string>('')
+const restoring = ref(false)
+const restoreError = ref('')
+let stopStartupWatch: WatchStopHandle | undefined
+let mounted = true
+
+function indicator(state: DownloadTaskState, downloaded: number, total: number) {
+  const labels: Record<DownloadTaskState, string> = {
+    Pending: '排队中',
+    Downloading: '下载中',
+    Paused: '已暂停',
+    Completed: '下载完成',
+    Failed: '下载失败',
+    Cancelled: '已取消',
+  }
+  return total === 0 ? labels[state] : `${labels[state]} ${downloaded}/${total}`
+}
+
+async function restoreQueue() {
+  if (restoring.value) return
+  restoring.value = true
+  restoreError.value = ''
+  try {
+    const result = await commands.restoreDownloadQueue()
+    if (result.status === 'error') restoreError.value = result.error.message
+  } catch (error) {
+    restoreError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    restoring.value = false
+  }
+}
 
 let unListenDownloadEvent: (() => void) | undefined
 onMounted(async () => {
@@ -33,8 +65,8 @@ onMounted(async () => {
 
         store.progresses.set(chapterInfo.chapterId, {
           ...data,
-          percentage: 0,
-          indicator: `排队中 ${downloadedImgCount}/${totalImgCount}`,
+          percentage: totalImgCount === 0 ? 0 : (downloadedImgCount / totalImgCount) * 100,
+          indicator: indicator(data.state, downloadedImgCount, totalImgCount),
         })
       } else if (event === 'TaskUpdate') {
         const { chapterId, state, downloadedImgCount, totalImgCount } = data
@@ -56,7 +88,7 @@ onMounted(async () => {
           await syncComicInWeekly(progressData)
         }
 
-        progressData.percentage = (downloadedImgCount / totalImgCount) * 100
+        progressData.percentage = totalImgCount === 0 ? 0 : (downloadedImgCount / totalImgCount) * 100
 
         let indicator = ''
         if (state === 'Pending') {
@@ -80,11 +112,22 @@ onMounted(async () => {
       }
     })
     .then((unListenFn) => {
-      unListenDownloadEvent = unListenFn
+      if (mounted) unListenDownloadEvent = unListenFn
+      else unListenFn()
     })
+  if (mounted)
+    stopStartupWatch = watch(
+      () => store.startupReady,
+      (ready) => {
+        if (ready) void restoreQueue()
+      },
+      { immediate: true },
+    )
 })
 
 onUnmounted(() => {
+  mounted = false
+  stopStartupWatch?.()
   unListenDownloadEvent?.()
 })
 
@@ -174,6 +217,11 @@ async function selectDownloadDir() {
 
 <template>
   <div v-if="store.config !== undefined" class="flex flex-col flex-1 overflow-auto">
+    <n-alert v-if="restoreError" type="error" class="m-2" title="恢复下载队列失败">
+      {{ restoreError }}
+      <n-button class="mt-2" size="small" :loading="restoring" @click="restoreQueue">重试恢复</n-button>
+    </n-alert>
+    <span v-if="restoring" class="px-2 pt-2 text-sm" role="status">正在恢复上次的下载任务…</span>
     <div class="flex gap-1 box-border px-2 pt-2.5">
       <n-input-group class="">
         <n-input-group-label size="small">下载目录</n-input-group-label>

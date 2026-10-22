@@ -53,6 +53,7 @@ fn specta_builder() -> tauri_specta::Builder<Wry> {
             get_user_profile,
             create_download_task,
             create_download_tasks,
+            restore_download_queue,
             get_chapter_downloaded_imgs,
             open_online_chapter,
             start_online_reader,
@@ -125,7 +126,7 @@ pub fn run() {
             app.manage(jm_client);
             app.manage(OnlineReader::default());
 
-            let download_manager = DownloadManager::new(app.handle());
+            let download_manager = DownloadManager::new(app.handle(), &app_data_dir);
             app.manage(download_manager);
 
             let export_lock = ComicExportLock::new();
