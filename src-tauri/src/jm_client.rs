@@ -14,7 +14,7 @@ use reqwest::cookie::Jar;
 use reqwest::StatusCode;
 use reqwest_middleware::ClientWithMiddleware;
 use reqwest_retry::policies::ExponentialBackoff;
-use reqwest_retry::{Jitter, RetryTransientMiddleware};
+use reqwest_retry::RetryTransientMiddleware;
 use serde_json::json;
 use tauri::AppHandle;
 use tracing::instrument;
@@ -27,6 +27,9 @@ use crate::responses::{
 };
 use crate::types::{FavoriteSort, ProxyMode, SearchSort};
 use crate::utils;
+
+mod api_routing;
+use api_routing::ApiRouting;
 
 pub const IMAGE_DOMAIN: &str = "cdn-msp2.jmapiproxy2.cc";
 
@@ -70,6 +73,7 @@ pub struct JmClient {
     app: AppHandle,
     api_client: Arc<RwLock<ClientWithMiddleware>>,
     api_jar: Arc<Jar>,
+    api_routing: Arc<ApiRouting>,
     img_client: Arc<RwLock<ClientWithMiddleware>>,
 }
 
@@ -86,6 +90,7 @@ impl JmClient {
             app,
             api_client,
             api_jar,
+            api_routing: Arc::new(ApiRouting::default()),
             img_client,
         }
     }
@@ -93,6 +98,7 @@ impl JmClient {
     pub fn reload_client(&self) {
         let api_client = create_api_client(&self.app, &self.api_jar);
         *self.api_client.write() = api_client;
+        self.api_routing.reset();
         let img_client = create_img_client(&self.app);
         *self.img_client.write() = img_client;
     }
@@ -112,29 +118,26 @@ impl JmClient {
             utils::md5_hex(&format!("{ts}{APP_TOKEN_SECRET}"))
         };
 
-        let api_domain = self.app.get_config().read().get_api_domain();
+        let domains = self.app.get_config().read().get_api_domains();
+        let api_domain = domains.first().ok_or_eyre("未配置 API 线路")?;
+        let can_replay = method == reqwest::Method::GET || path == ApiPath::GetUserProfile;
         let path = path.as_str();
-        let request = self
-            .api_client
-            .read()
+        let client = self.api_client.read().clone();
+        let request = client
             .request(method, format!("https://{api_domain}{path}").as_str())
             .header("token", token)
             .header("tokenparam", tokenparam)
             .header("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36");
 
-        let http_resp = match form {
-            Some(payload) => request.query(&query).form(&payload).send().await,
-            None => request.query(&query).send().await,
+        let request = match form {
+            Some(payload) => request.query(&query).form(&payload),
+            None => request.query(&query),
         }
-        .map_err(|e| {
-            if e.is_timeout() {
-                eyre::Report::from(e).wrap_err("连接超时，请使用代理或换条线路重试")
-            } else {
-                eyre::Report::from(e)
-            }
-        })?;
+        .build()?;
 
-        Ok(http_resp)
+        self.api_routing
+            .send(&client, request, &domains, can_replay)
+            .await
     }
 
     async fn jm_get(
@@ -603,7 +606,10 @@ impl JmClient {
 }
 
 pub fn create_api_client(app: &AppHandle, jar: &Arc<Jar>) -> ClientWithMiddleware {
-    let builder = reqwest::ClientBuilder::new().cookie_provider(jar.clone());
+    let builder = reqwest::ClientBuilder::new()
+        .cookie_provider(jar.clone())
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(15));
 
     let proxy_mode = app.get_config().read().proxy_mode.clone();
     let builder = match proxy_mode {
@@ -628,14 +634,7 @@ pub fn create_api_client(app: &AppHandle, jar: &Arc<Jar>) -> ClientWithMiddlewar
         }
     };
 
-    let retry_policy = ExponentialBackoff::builder()
-        .base(1) // 指数为1，保证重试间隔为1秒不变
-        .jitter(Jitter::Bounded) // 重试间隔在1秒左右波动
-        .build_with_total_retry_duration(Duration::from_secs(5)); // 重试总时长为5秒
-
-    reqwest_middleware::ClientBuilder::new(builder.build().unwrap())
-        .with(RetryTransientMiddleware::new_with_policy(retry_policy))
-        .build()
+    reqwest_middleware::ClientBuilder::new(builder.build().unwrap()).build()
 }
 
 pub fn create_img_client(app: &AppHandle) -> ClientWithMiddleware {
