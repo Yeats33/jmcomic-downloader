@@ -73,7 +73,8 @@ function keydown(event: KeyboardEvent) {
   else if (event.key === '-') scale.value = Math.max(scale.value - 25, 25)
 }
 
-watch([currentPage, filenames, loading, () => store.readerLayout], () => {
+function rememberPage(page: number) {
+  if (page !== currentPage.value) return
   const comic = store.readerComic
   const id = chapterId.value
   const filename = filenames.value[currentPage.value - 1]
@@ -90,7 +91,7 @@ watch([currentPage, filenames, loading, () => store.readerLayout], () => {
     layout: store.readerLayout,
     updatedAt: Date.now(),
   })
-})
+}
 watch(chapterId, async (id, previous) => {
   scale.value = 100
   if (id !== null) {
@@ -141,6 +142,7 @@ onUnmounted(() => {
       :loading="loading"
       :error="error"
       @visible-page="showPage"
+      @page-displayed="rememberPage"
       @retry="refresh" />
     <ReaderNavigation
       v-model:layout="store.readerLayout"

@@ -105,6 +105,8 @@ window.__TAURI_INTERNALS__ = {
     return id
   },
   convertFileSrc(path) {
+    if (qa.failedLocalPage && path.endsWith(`/${String(qa.failedLocalPage).padStart(4, '0')}.jpg`))
+      return 'data:image/png;base64,AA=='
     return image(path)
   },
   async invoke(command, args = {}) {
@@ -199,7 +201,10 @@ window.__TAURI_INTERNALS__ = {
       context.fillText(`Online page ${args.pageIndex + 1}`, 50, 150)
       const bytes = Uint8Array.from(atob(canvas.toDataURL('image/png').split(',')[1]), (char) => char.charCodeAt(0))
       const deliver = callbacks.get(args.onChunk.id)
-      deliver({ message: { event: 'Chunk', data: Array.from(bytes) }, index: 0 })
+      deliver({
+        message: { event: 'Chunk', data: qa.corruptPage === args.pageIndex ? [0] : Array.from(bytes) },
+        index: 0,
+      })
       deliver({ message: { event: 'Complete', data: { mime: 'image/png', blocks: 0 } }, index: 1 })
       deliver({ end: true, index: 2 })
       return null

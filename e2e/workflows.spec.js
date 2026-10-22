@@ -1,6 +1,11 @@
 import { test, expect } from '@playwright/test'
 
+const runtimeErrors = new WeakMap()
+
 test.beforeEach(async ({ page }) => {
+  const errors = []
+  runtimeErrors.set(page, errors)
+  page.on('pageerror', (error) => errors.push(error.message))
   await page.route('https://**/*', (route) =>
     route.fulfill({
       contentType: 'image/svg+xml',
@@ -9,6 +14,9 @@ test.beforeEach(async ({ page }) => {
   )
   await page.goto('/tests/workflows.html')
   await expect(page.getByRole('button', { name: '下载勾选章节', exact: true })).toBeVisible()
+})
+test.afterEach(async ({ page }) => {
+  expect(runtimeErrors.get(page)).toEqual([])
 })
 const tab = (page, name) => page.locator('.n-tabs-tab').filter({ hasText: new RegExp(`^${name}$`) })
 const localReader = (page) => page.getByRole('dialog', { name: '本地阅读', exact: true })
@@ -102,6 +110,39 @@ test('online continue reading starts at the saved page', async ({ page }) => {
   )
   expect(requested[0]).toBe(3)
 })
+
+test('online page failure is visible and retry reloads the image', async ({ page }) => {
+  await page.evaluate(() => {
+    const qa = window.workflowQa
+    qa.failPage = 0
+    qa.store.openOnlineReader(qa.comic, qa.comic.chapterInfos[0])
+  })
+  await expect(onlineReader(page).getByText('测试页面加载失败', { exact: true })).toBeVisible()
+  await page.evaluate(() => {
+    window.workflowQa.failPage = null
+  })
+  await onlineReader(page).getByRole('button', { name: '重试', exact: true }).click()
+  await expect(onlineReader(page).getByRole('img', { name: /第 1 页$/ })).toBeVisible()
+})
+
+for (const mode of ['local', 'online'])
+  test(`${mode} corrupt image preserves the last readable bookmark`, async ({ page }) => {
+    await page.evaluate((mode) => {
+      if (mode === 'local') window.workflowQa.failedLocalPage = 2
+      else window.workflowQa.corruptPage = 1
+    }, mode)
+    if (mode === 'local') await openLocal(page)
+    else await openOnline(page)
+    const reader = mode === 'local' ? localReader(page) : onlineReader(page)
+    await reader.getByRole('img', { name: /第 1 页$/ }).evaluate((image) => image.decode())
+    await reader.getByRole('button', { name: '下一页', exact: true }).click()
+    await expect(reader.getByText('图片显示失败，请重试', { exact: true })).toBeVisible()
+    await reader.getByRole('button', { name: mode === 'local' ? '关闭本地阅读' : '关闭在线阅读' }).click()
+    await tab(page, '阅读记录').click()
+    await expect(
+      page.getByText(`${mode === 'local' ? '本地阅读' : '在线阅读'} · 第 1 / 6 页`, { exact: true }),
+    ).toBeVisible()
+  })
 
 for (const mode of ['local', 'online'])
   test(`${mode} continuous scrolling updates the current page`, async ({ page }) => {

@@ -12,7 +12,12 @@ const props = defineProps<{
   loading: boolean
   error: string
 }>()
-const emit = defineEmits<{ visiblePage: [page: number]; retry: [page: number]; imageError: [page: number] }>()
+const emit = defineEmits<{
+  visiblePage: [page: number]
+  pageDisplayed: [page: number]
+  retry: [page: number]
+  imageError: [page: number]
+}>()
 const viewport = ref<HTMLElement | null>(null)
 const ratios = shallowReactive(new Map<string, number>())
 const failed = shallowReactive(new Set<string>())
@@ -23,6 +28,18 @@ const visiblePages = computed(() =>
 )
 let lastReported = 0
 let frame = 0
+let lastDisplayed: { page: number; url: string; layout: ReaderLayout } | undefined
+
+function reportDisplayedPage() {
+  const item = props.pages[props.page - 1]
+  if (item === undefined || !item.url || props.loading || props.error || failed.has(item.key)) return
+  const image = viewport.value?.querySelector<HTMLImageElement>(`[data-reader-page="${props.page}"] img`)
+  if (!image?.complete || image.naturalWidth === 0 || image.getAttribute('src') !== item.url) return
+  if (lastDisplayed?.page === props.page && lastDisplayed.url === item.url && lastDisplayed.layout === props.layout)
+    return
+  lastDisplayed = { page: props.page, url: item.url, layout: props.layout }
+  emit('pageDisplayed', props.page)
+}
 
 function onScroll() {
   if (props.layout !== 'scroll' || frame !== 0) return
@@ -66,6 +83,7 @@ function loaded(key: string, event: Event) {
   const image = event.target
   if (image instanceof HTMLImageElement && image.naturalHeight > 0)
     ratios.set(key, image.naturalWidth / image.naturalHeight)
+  void nextTick(reportDisplayedPage)
 }
 function failedImage(key: string, page: number) {
   failed.add(key)
@@ -75,6 +93,9 @@ function retry(key: string, page: number) {
   failed.delete(key)
   emit('retry', page)
 }
+watch([() => props.page, () => props.layout, () => props.loading, () => props.pages[props.page - 1]?.url], () => {
+  void nextTick(reportDisplayedPage)
+})
 watch(
   () => [props.page, props.pages.length],
   () => {
@@ -102,7 +123,9 @@ onUnmounted(() => {
     @scroll.passive="onScroll">
     <div v-if="pages.length === 0" class="m-auto text-center text-gray-3 py-6" role="status">
       <n-spin v-if="loading" size="large" />
-      <p>{{ loading ? '正在加载章节…' : error || '这个章节暂无可阅读的图片' }}</p>
+      <p :class="{ 'text-red-3': error && !loading }">
+        {{ loading ? '正在加载章节…' : error || '这个章节暂无可阅读的图片' }}
+      </p>
       <n-button v-if="error" size="small" class="text-white!" @click="emit('retry', page)">重试</n-button>
     </div>
     <div
@@ -137,7 +160,7 @@ onUnmounted(() => {
         class="h-full min-h-48 flex flex-col items-center justify-center gap-3 text-gray-3 p-4 box-border text-center"
         role="status">
         <n-spin v-if="loading && item.number === page" />
-        <span>
+        <span :class="{ 'text-red-3': failed.has(item.key) || (item.number === page && error) }">
           {{
             failed.has(item.key)
               ? '图片显示失败，请重试'

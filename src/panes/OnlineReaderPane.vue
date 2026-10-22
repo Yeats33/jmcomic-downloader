@@ -93,7 +93,8 @@ watch(
   },
   { immediate: true },
 )
-watch([currentPage, imageUrl, loading, () => store.readerLayout], () => {
+function rememberPage(page: number) {
+  if (page !== currentPage.value) return
   const comic = store.onlineReaderComic
   const chapter = store.onlineReaderChapter
   if (comic === null || chapter === null || loading.value || imageUrl.value === '' || error.value) return
@@ -109,7 +110,7 @@ watch([currentPage, imageUrl, loading, () => store.readerLayout], () => {
     layout: store.readerLayout,
     updatedAt: Date.now(),
   })
-})
+}
 onMounted(() => {
   previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
   panel.value?.focus()
@@ -172,6 +173,7 @@ onUnmounted(() => {
       :loading="loading"
       :error="error"
       @visible-page="showPage"
+      @page-displayed="rememberPage"
       @retry="retry"
       @image-error="invalidatePage" />
     <ReaderNavigation
