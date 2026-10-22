@@ -51,12 +51,13 @@ async function search(keyword: string, page: number, sort: SearchSort) {
   const searchResultVariant = result.data
   if ('SearchResult' in searchResultVariant) {
     const respData = searchResultVariant.SearchResult
+    store.searchResult = respData
     if (respData.content.length === 0) {
+      searchPage.value = 1
       message.warning('什么都没有搜到，请尝试其他关键词')
       searching.value = false
       return
     }
-    store.searchResult = respData
     console.log(respData)
   } else if ('Comic' in searchResultVariant) {
     const comic = searchResultVariant.Comic
