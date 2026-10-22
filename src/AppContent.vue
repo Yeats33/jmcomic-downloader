@@ -15,6 +15,7 @@ import LogDialog from './dialogs/LogDialog.vue'
 import WeeklyPane from './panes/WeeklyPane.vue'
 import ReaderPane from './panes/ReaderPane.vue'
 import OnlineReaderPane from './panes/OnlineReaderPane.vue'
+import HistoryPane from './panes/HistoryPane.vue'
 
 const store = useStore()
 
@@ -42,6 +43,7 @@ watch(
 )
 
 onMounted(async () => {
+  store.initializeReadingHistory()
   // 屏蔽浏览器右键菜单
   document.oncontextmenu = (event) => {
     event.preventDefault()
@@ -82,6 +84,9 @@ onMounted(async () => {
       </n-tab-pane>
       <n-tab-pane class="h-full overflow-auto p-0!" name="chapter" tab="章节详情" display-directive="show">
         <ChapterPane />
+      </n-tab-pane>
+      <n-tab-pane class="h-full overflow-hidden p-0!" name="history" tab="阅读记录" display-directive="show">
+        <HistoryPane />
       </n-tab-pane>
     </n-tabs>
     <div class="w-1/2 overflow-auto flex flex-col">

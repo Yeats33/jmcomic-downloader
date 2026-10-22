@@ -15,6 +15,10 @@ Use the existing 4px spacing unit. Toolbars wrap on narrow windows; scrolling be
 ## 5. Components and states
 Reuse NButton, NRadioGroup/NRadioButton, NSelect, NInputNumber, NSpin and NAlert. Online reading is a third chapter mode alongside downloading and exporting. A chapter opens from its own reading button. Show page position, incoming bytes, loading, retry and empty states. The online reader toolbar includes a labeled forward-buffer page count from 0 to 50, with 0 disabling preloading and 1 as the default. Changes apply immediately and use the existing automatic configuration saving. Local reading keeps its existing controls.
 
+Both readers share a ReaderViewport (single page or continuous vertical scrolling) and ReaderNavigation (previous/next, labeled page input, layout and zoom). The viewport alone owns scrolling between fixed, wrapping toolbars. Continuous pages retain their measured aspect ratios when online images are evicted, so cache trimming does not move the reading position. A reader records only successfully loaded positions. The reading-history tab shows the saved chapter, page and local/online mode, with a Continue Reading action and actionable missing-file/network errors.
+
+The inventory toolbar uses labeled search, tag, completeness and sort controls. Filters apply before pagination; changing them clears the visible selection. A result count and an empty state make the filter scope explicit. Context-menu deletion acts on highlighted rows; the toolbar deletion acts on checkboxes. The confirmation names the affected comics.
+
 ## 6. Interaction
 Retain arrow-key paging, Escape to close, and zoom controls. Ignore reader shortcuts while typing or choosing a chapter. Respect reduced motion. Closing or switching chapters cancels obsolete transfers and releases image object URLs.
 

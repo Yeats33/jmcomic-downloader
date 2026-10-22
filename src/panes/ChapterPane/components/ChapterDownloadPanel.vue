@@ -82,8 +82,12 @@ function updateSelectedIds({
     changed: { added, removed },
   },
 }: SelectionEvent) {
-  extractIds(added).forEach((id) => selectedIds.value.add(id))
-  extractIds(removed).forEach((id) => selectedIds.value.delete(id))
+  extractIds(added).forEach((id) => {
+    selectedIds.value.add(id)
+  })
+  extractIds(removed).forEach((id) => {
+    selectedIds.value.delete(id)
+  })
 }
 
 const dropdownX = ref<number>(0)
@@ -95,7 +99,9 @@ const dropdownOptions: DropdownOption[] = [
     key: 'check',
     props: {
       onClick: () => {
-        selectedIds.value.forEach((id) => checkedIds.value.add(id))
+        selectedIds.value.forEach((id) => {
+          checkedIds.value.add(id)
+        })
         dropdownShowing.value = false
       },
     },
@@ -105,7 +111,9 @@ const dropdownOptions: DropdownOption[] = [
     key: 'uncheck',
     props: {
       onClick: () => {
-        selectedIds.value.forEach((id) => checkedIds.value.delete(id))
+        selectedIds.value.forEach((id) => {
+          checkedIds.value.delete(id)
+        })
         dropdownShowing.value = false
       },
     },
@@ -117,7 +125,9 @@ const dropdownOptions: DropdownOption[] = [
       onClick: () => {
         chapterInfos.value
           .filter((chapter) => isChapterSelectable(chapter))
-          .forEach((chapter) => checkedIds.value.add(chapter.chapterId))
+          .forEach((chapter) => {
+            checkedIds.value.add(chapter.chapterId)
+          })
         dropdownShowing.value = false
       },
     },
@@ -179,14 +189,13 @@ function canReadChapter(chapterId: number, isDownloaded: boolean | null | undefi
   return isDownloaded === true || store.progresses.has(chapterId)
 }
 
-function openReader(chapterId: number, chapterTitle: string) {
+function openReader(chapterId: number) {
   if (store.pickedComic === undefined) {
     return
   }
 
-  store.readerComic = store.pickedComic
-  store.readerChapterId = chapterId
-  store.readerChapterTitle = chapterTitle
+  const chapter = chapterInfos.value.find((item) => item.chapterId === chapterId)
+  if (chapter !== undefined) store.openLocalReader(store.pickedComic, chapter)
 }
 
 const ChapterCheckbox = defineComponent({
@@ -250,7 +259,7 @@ const ChapterCheckbox = defineComponent({
             v-if="canReadChapter(chapter.chapterId, chapter.isDownloaded)"
             size="tiny"
             secondary
-            @click.stop="openReader(chapter.chapterId, chapter.chapterTitle)">
+            @click.stop="openReader(chapter.chapterId)">
             阅读
           </n-button>
         </div>

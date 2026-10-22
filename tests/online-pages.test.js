@@ -42,11 +42,17 @@ beforeEach(() => {
     liveUrls.add(url)
     return url
   }
-  URL.revokeObjectURL = (url) => { liveUrls.delete(url); revokeUrl(url) }
+  URL.revokeObjectURL = (url) => {
+    liveUrls.delete(url)
+    revokeUrl(url)
+  }
   mockIPC((command, args) => {
     if (command === 'start_online_reader') return `session-${++sessionNumber}`
     if (command === 'open_online_chapter') return { sessionId: args.sessionId, pageCount: 6 }
-    if (command === 'close_online_reader') { closed.push(args.sessionId); return }
+    if (command === 'close_online_reader') {
+      closed.push(args.sessionId)
+      return
+    }
     if (command === 'stream_online_page') {
       requests.push({ session: args.sessionId, page: args.pageIndex })
       const deliver = window[`_${args.onChunk.id}`]
@@ -59,7 +65,10 @@ beforeEach(() => {
   })
   prefetchPages = ref(1)
   app = renderer.createApp({
-    setup() { reader = useOnlinePages(prefetchPages); return () => null },
+    setup() {
+      reader = useOnlinePages(prefetchPages)
+      return () => null
+    },
   })
   app.mount({})
 })
@@ -75,6 +84,22 @@ afterEach(() => {
 })
 
 describe('configurable online reader buffering', () => {
+  test('resumes a saved page without first loading page one', async () => {
+    prefetchPages.value = 0
+    await reader.openChapter(101, 4)
+    await settleTransfers()
+    expect(reader.currentPage.value).toBe(4)
+    expect(requests.map(({ page }) => page)).toEqual([3])
+    expect(reader.pageUrls.get(3)).toBe(reader.imageUrl.value)
+  })
+
+  test('clamps a saved page after the chapter becomes shorter', async () => {
+    prefetchPages.value = 0
+    await reader.openChapter(101, 20)
+    await settleTransfers()
+    expect(reader.currentPage.value).toBe(6)
+    expect(requests.map(({ page }) => page)).toEqual([5])
+  })
   test('loads only the current page when buffering is disabled', async () => {
     prefetchPages.value = 0
 

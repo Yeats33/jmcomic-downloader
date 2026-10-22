@@ -1,5 +1,5 @@
 import { Channel } from '@tauri-apps/api/core'
-import { onUnmounted, ref, watch } from 'vue'
+import { onUnmounted, ref, shallowReactive, watch } from 'vue'
 import type { Ref } from 'vue'
 import { commands } from '../bindings.ts'
 import type { OnlinePageEvent } from '../bindings.ts'
@@ -12,7 +12,7 @@ export function useOnlinePages(prefetchPages: Readonly<Ref<number>>) {
   const loading = ref(false)
   const error = ref('')
   const receivedBytes = ref(0)
-  const cache = new Map<number, string>()
+  const cache = shallowReactive(new Map<number, string>())
   const pending = new Map<number, Promise<string>>()
   let generation = 0
   let sessionId: string | null = null
@@ -24,7 +24,10 @@ export function useOnlinePages(prefetchPages: Readonly<Ref<number>>) {
 
   function trimCache() {
     for (const [index, url] of cache) {
-      if (!shouldCachePage(index)) { URL.revokeObjectURL(url); cache.delete(index) }
+      if (!shouldCachePage(index)) {
+        URL.revokeObjectURL(url)
+        cache.delete(index)
+      }
     }
   }
 
@@ -32,7 +35,8 @@ export function useOnlinePages(prefetchPages: Readonly<Ref<number>>) {
     generation++
     const id = sessionId
     sessionId = null
-    if (id !== null) void commands.closeOnlineReader(id).catch((cause: unknown) => console.error('关闭在线阅读失败', cause))
+    if (id !== null)
+      void commands.closeOnlineReader(id).catch((cause: unknown) => console.error('关闭在线阅读失败', cause))
     for (const url of cache.values()) URL.revokeObjectURL(url)
     cache.clear()
     pending.clear()
@@ -59,7 +63,11 @@ export function useOnlinePages(prefetchPages: Readonly<Ref<number>>) {
             break
           case 'Complete':
             channel.onmessage = () => {}
-            if (version !== generation) { chunks.length = 0; resolve(''); return }
+            if (version !== generation) {
+              chunks.length = 0
+              resolve('')
+              return
+            }
             void onlineImageUrl(chunks, event.data.mime, event.data.blocks).then(resolve, reject)
             chunks.length = 0
             break
@@ -68,18 +76,20 @@ export function useOnlinePages(prefetchPages: Readonly<Ref<number>>) {
       void commands.streamOnlinePage(id, index, channel).then((result) => {
         if (result.status === 'error') reject(new Error(result.error.message))
       }, reject)
-    }).then((url) => {
-      if (version === generation && shouldCachePage(index)) {
-        cache.set(index, url)
-        return url
-      }
-      if (url !== '') URL.revokeObjectURL(url)
-      return ''
-    }).finally(() => {
-      chunks.length = 0
-      channel.onmessage = () => {}
-      if (pending.get(index) === transfer) pending.delete(index)
     })
+      .then((url) => {
+        if (version === generation && shouldCachePage(index)) {
+          cache.set(index, url)
+          return url
+        }
+        if (url !== '') URL.revokeObjectURL(url)
+        return ''
+      })
+      .finally(() => {
+        chunks.length = 0
+        channel.onmessage = () => {}
+        if (pending.get(index) === transfer) pending.delete(index)
+      })
     pending.set(index, transfer)
     return transfer
   }
@@ -98,7 +108,7 @@ export function useOnlinePages(prefetchPages: Readonly<Ref<number>>) {
   }
 
   async function showPage(page: number) {
-    if (page < 1 || page > pageCount.value) return
+    if (!Number.isInteger(page) || page < 1 || page > pageCount.value) return
     currentPage.value = page
     loading.value = true
     error.value = ''
@@ -112,13 +122,14 @@ export function useOnlinePages(prefetchPages: Readonly<Ref<number>>) {
       imageUrl.value = url
       void prefetch()
     } catch (cause) {
-      if (version === generation) error.value = cause instanceof Error ? cause.message : String(cause)
+      if (version === generation && currentPage.value === page)
+        error.value = cause instanceof Error ? cause.message : String(cause)
     } finally {
       if (version === generation && currentPage.value === page) loading.value = false
     }
   }
 
-  async function openChapter(chapterId: number) {
+  async function openChapter(chapterId: number, startPage = 1) {
     clear()
     currentPage.value = 1
     pageCount.value = 0
@@ -128,14 +139,20 @@ export function useOnlinePages(prefetchPages: Readonly<Ref<number>>) {
     const version = generation
     try {
       const id = await commands.startOnlineReader()
-      if (version !== generation) { await commands.closeOnlineReader(id); return }
+      if (version !== generation) {
+        await commands.closeOnlineReader(id)
+        return
+      }
       sessionId = id
       const result = await commands.openOnlineChapter(id, chapterId)
       if (result.status === 'error') throw new Error(result.error.message)
-      if (version !== generation) { await commands.closeOnlineReader(result.data.sessionId); return }
+      if (version !== generation) {
+        await commands.closeOnlineReader(result.data.sessionId)
+        return
+      }
       sessionId = result.data.sessionId
       pageCount.value = result.data.pageCount
-      await showPage(1)
+      await showPage(Math.max(1, Math.min(startPage, pageCount.value)))
     } catch (cause) {
       if (version === generation) error.value = cause instanceof Error ? cause.message : String(cause)
     } finally {
@@ -143,12 +160,14 @@ export function useOnlinePages(prefetchPages: Readonly<Ref<number>>) {
     }
   }
 
-  function invalidatePage() {
-    const url = cache.get(currentPage.value - 1)
+  function invalidatePage(page = currentPage.value) {
+    const url = cache.get(page - 1)
     if (url !== undefined) URL.revokeObjectURL(url)
-    cache.delete(currentPage.value - 1)
-    imageUrl.value = ''
-    error.value = '图片显示失败，请重试'
+    cache.delete(page - 1)
+    if (page === currentPage.value) {
+      imageUrl.value = ''
+      error.value = '图片显示失败，请重试'
+    }
   }
 
   watch(prefetchPages, () => {
@@ -157,5 +176,16 @@ export function useOnlinePages(prefetchPages: Readonly<Ref<number>>) {
   })
 
   onUnmounted(clear)
-  return { currentPage, pageCount, imageUrl, loading, error, receivedBytes, showPage, openChapter, invalidatePage }
+  return {
+    currentPage,
+    pageCount,
+    imageUrl,
+    pageUrls: cache,
+    loading,
+    error,
+    receivedBytes,
+    showPage,
+    openChapter,
+    invalidatePage,
+  }
 }
