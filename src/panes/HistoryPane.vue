@@ -79,7 +79,7 @@ async function resume(progress: ReadingProgress) {
         v-for="entry in entries"
         :key="bookmarkKey(entry)"
         class="border border-solid border-gray-2 rounded-md p-3 flex flex-wrap items-center gap-2">
-        <div class="flex-1 min-w-0">
+        <div class="basis-full min-w-0">
           <div class="font-semibold truncate" :title="entry.comicName">{{ entry.comicName }}</div>
           <div class="text-sm truncate" :title="entry.chapterTitle">{{ entry.chapterTitle }}</div>
           <div class="text-sm">

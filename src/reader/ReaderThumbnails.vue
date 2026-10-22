@@ -118,7 +118,7 @@ onUnmounted(() => {
       <button
         v-for="number in numbers"
         :key="number"
-        class="border border-gray-7 rounded p-1 cursor-pointer min-w-0 focus-visible:outline-orange-4"
+        class="border border-gray-7 rounded p-1 cursor-pointer min-w-0 text-white focus-visible:outline-orange-4"
         :class="number === page ? 'bg-gray-7' : 'bg-gray-8 hover:bg-gray-7'"
         :aria-label="`跳转到第 ${number} 页`"
         :aria-current="number === page ? 'page' : undefined"
