@@ -190,6 +190,21 @@ test('Escape closes the chapter selector before closing the online reader', asyn
 })
 
 for (const mode of ['local', 'online'])
+  test(`${mode} thumbnail overview jumps by image and releases preview resources`, async ({ page }) => {
+    if (mode === 'local') await openLocal(page)
+    else await openOnline(page)
+    const reader = mode === 'local' ? localReader(page) : onlineReader(page)
+    await reader.getByRole('button', { name: '页面总览', exact: true }).click()
+    const overview = reader.getByRole('region', { name: '页面总览', exact: true })
+    await expect(overview.getByRole('img', { name: '第 5 页预览', exact: true })).toBeVisible()
+    await overview.getByRole('button', { name: '跳转到第 5 页', exact: true }).click()
+    await expect(overview).toHaveCount(0)
+    await expect(reader.getByRole('img', { name: /第 5 页$/ })).toBeVisible()
+    await reader.getByRole('button', { name: mode === 'local' ? '关闭本地阅读' : '关闭在线阅读' }).click()
+    await expect.poll(() => page.evaluate(() => window.workflowQa.urls.size)).toBe(0)
+  })
+
+for (const mode of ['local', 'online'])
   test(`${mode} corrupt image preserves the last readable bookmark`, async ({ page }) => {
     await page.evaluate((mode) => {
       if (mode === 'local') window.workflowQa.failedLocalPage = 2

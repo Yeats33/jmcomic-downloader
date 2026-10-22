@@ -7,6 +7,7 @@ import { useOnlinePages } from '../reader/useOnlinePages.ts'
 import ReaderNavigation from '../reader/ReaderNavigation.vue'
 import ReaderViewport from '../reader/ReaderViewport.vue'
 import ReaderBookmarks from '../reader/ReaderBookmarks.vue'
+import ReaderThumbnails from '../reader/ReaderThumbnails.vue'
 
 const store = useStore()
 const prefetchPages = computed(() => store.config?.onlineReaderPrefetchPages ?? 1)
@@ -27,6 +28,7 @@ const pages = computed(() =>
 )
 const scale = computed({ get: () => store.readerScale, set: (value: number) => { store.readerScale = value } })
 const chapterMenuOpen = ref(false)
+const thumbnailsOpen = ref(false)
 const panel = ref<HTMLElement | null>(null)
 let previousFocus: HTMLElement | null = null
 const chapters = computed(() => orderedChapters(store.onlineReaderComic?.chapterInfos ?? []))
@@ -67,6 +69,7 @@ function keydown(event: KeyboardEvent) {
     event.preventDefault()
     event.stopPropagation()
     if (chapterMenuOpen.value) chapterMenuOpen.value = false
+    else if (thumbnailsOpen.value) thumbnailsOpen.value = false
     else close()
     return
   }
@@ -101,6 +104,7 @@ function keydown(event: KeyboardEvent) {
 watch(
   chapterId,
   (id) => {
+    thumbnailsOpen.value = false
     if (id !== null) void openChapter(id, store.onlineReaderStartPage)
   },
   { immediate: true },
@@ -153,6 +157,7 @@ onUnmounted(() => {
         aria-label="选择章节"
         @update:value="selectChapter" />
       <span class="text-gray-3 text-sm whitespace-nowrap">{{ currentPage }} / {{ pageCount || '—' }} 页</span>
+      <n-button size="small" class="text-white!" :aria-expanded="thumbnailsOpen" @click="thumbnailsOpen = !thumbnailsOpen">页面总览</n-button>
       <n-checkbox :checked="store.autoNextChapter" @update:checked="store.setAutoNextChapter">
         <span class="text-white">自动下一章</span>
       </n-checkbox>
@@ -179,6 +184,9 @@ onUnmounted(() => {
         {{ store.readingHistoryError }}
       </span>
     </header>
+    <ReaderThumbnails v-if="thumbnailsOpen && chapterId !== null" mode="online" :chapter-id="chapterId"
+      :page="currentPage" :page-count="pageCount" :pages="pages" @close="thumbnailsOpen = false"
+      @navigate="showPage($event); thumbnailsOpen = false" />
     <ReaderViewport
       :key="chapterId ?? 'closed'"
       :pages="pages"

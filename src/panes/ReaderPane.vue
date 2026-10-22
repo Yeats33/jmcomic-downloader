@@ -9,6 +9,7 @@ import { useLocalPages } from '../reader/useLocalPages.ts'
 import ReaderNavigation from '../reader/ReaderNavigation.vue'
 import ReaderViewport from '../reader/ReaderViewport.vue'
 import ReaderBookmarks from '../reader/ReaderBookmarks.vue'
+import ReaderThumbnails from '../reader/ReaderThumbnails.vue'
 
 const store = useStore()
 const chapterId = computed(() => store.readerChapterId)
@@ -27,6 +28,7 @@ const { pages, filenames, directory, currentPage, totalImgCount, downloading, lo
 const scale = computed({ get: () => store.readerScale, set: (value: number) => { store.readerScale = value } })
 const panel = ref<HTMLElement | null>(null)
 const chapterMenuOpen = ref(false)
+const thumbnailsOpen = ref(false)
 const chapters = computed(() => orderedChapters(store.readerComic?.chapterInfos ?? []))
 const previousChapter = computed(() => adjacentChapter(chapters.value, chapterId.value, -1))
 const nextChapter = computed(() => adjacentChapter(chapters.value, chapterId.value, 1))
@@ -72,6 +74,7 @@ function keydown(event: KeyboardEvent) {
     event.preventDefault()
     event.stopPropagation()
     if (chapterMenuOpen.value) chapterMenuOpen.value = false
+    else if (thumbnailsOpen.value) thumbnailsOpen.value = false
     else close()
     return
   }
@@ -125,6 +128,7 @@ function rememberPage(page: number) {
   })
 }
 watch(chapterId, async (id, previous) => {
+  thumbnailsOpen.value = false
   if (id !== null) {
     if (previous === null) previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
     await nextTick()
@@ -154,6 +158,7 @@ onUnmounted(() => {
       <n-checkbox :checked="store.autoNextChapter" @update:checked="store.setAutoNextChapter">
         <span class="text-white">自动下一章</span>
       </n-checkbox>
+      <n-button size="small" class="text-white!" :aria-expanded="thumbnailsOpen" @click="thumbnailsOpen = !thumbnailsOpen">页面总览</n-button>
       <span class="text-gray-3 text-sm whitespace-nowrap">第 {{ currentPage }} / {{ pages.length || '—' }} 页</span>
       <span class="text-gray-3 text-sm whitespace-nowrap">已下载 {{ pages.length }} / {{ totalImgCount }}</span>
       <span v-if="downloading" class="text-sm text-yellow-3">下载中</span>
@@ -165,6 +170,9 @@ onUnmounted(() => {
         {{ store.readingHistoryError }}
       </span>
     </header>
+    <ReaderThumbnails v-if="thumbnailsOpen && chapterId !== null" mode="local" :chapter-id="chapterId"
+      :page="currentPage" :page-count="pages.length" :pages="pages" @close="thumbnailsOpen = false"
+      @navigate="showPage($event); thumbnailsOpen = false" />
     <ReaderViewport
       :key="chapterId"
       :pages="pages"
