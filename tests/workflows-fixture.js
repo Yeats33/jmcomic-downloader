@@ -54,6 +54,8 @@ const qa = (window.workflowQa = {
   queue: JSON.parse(localStorage.getItem('fixture-queue') ?? '[]'),
   urls: new Set(),
   restoreCalls: 0,
+  updatedComics: new Map(),
+  createdDownloads: [],
 })
 const createUrl = URL.createObjectURL.bind(URL)
 const revokeUrl = URL.revokeObjectURL.bind(URL)
@@ -113,7 +115,8 @@ window.__TAURI_INTERNALS__ = {
   async invoke(command, args = {}) {
     if (command === 'get_config') return config
     if (command === 'save_config') return null
-    if (command === 'get_comic') return comic
+    if (command === 'get_comic') return qa.updatedComics.get(args.aid) ?? comic
+    if (command === 'create_download_task') { qa.createdDownloads.push(args.chapterId); return null }
     if (command === 'get_downloaded_comics') return comics.filter((item) => !qa.deleted.includes(item.id))
     if (command === 'delete_downloaded_comic') {
       qa.deleted.push(args.comic.id)

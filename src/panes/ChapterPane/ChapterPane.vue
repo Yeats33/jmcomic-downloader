@@ -7,7 +7,9 @@ import IconButton from '../../components/IconButton.vue'
 import ChapterDownloadPanel from './components/ChapterDownloadPanel.vue'
 import ChapterExportPanel from './components/ChapterExportPanel.vue'
 import ChapterReadPanel from './components/ChapterReadPanel.vue'
-import { NEmpty } from 'naive-ui'
+import { NAlert, NButton, NEmpty } from 'naive-ui'
+import { useFollowing } from '../../following.ts'
+const following = useFollowing()
 
 export type ChapterPaneMode = 'download' | 'export' | 'read'
 
@@ -75,6 +77,10 @@ async function showComicDownloadDirInFileManager() {
           <span class="font-bold text-lg line-clamp-2">{{ store.pickedComic.name }}</span>
           <span class="text-red">作者：{{ store.pickedComic.author }}</span>
           <span class="text-gray">标签：{{ store.pickedComic.tags }}</span>
+          <n-button class="mr-auto" size="small" @click="following.toggle(store.pickedComic)">
+            {{ following.comics.some((comic) => comic.id === store.pickedComic?.id) ? '取消追更' : '追更此漫画' }}
+          </n-button>
+          <n-alert v-if="following.error" type="error">{{ following.error }}</n-alert>
           <IconButton
             v-if="store.pickedComic.isDownloaded"
             class="mt-auto mr-auto"

@@ -164,6 +164,28 @@ test('page bookmarks reopen the bookmarked page after reading elsewhere and rest
   await expect(page.locator('.downloaded-pane-selection-container [data-key]')).toHaveCount(1)
 })
 
+test('following persists and update preview downloads only the chosen new chapters', async ({ page }) => {
+  await page.getByRole('button', { name: '追更此漫画', exact: true }).click()
+  await page.reload()
+  await expect(page.getByRole('button', { name: '取消追更', exact: true })).toBeVisible()
+  await page.evaluate(() => {
+    const qa = window.workflowQa
+    qa.updatedComics.set(qa.comic.id, { ...qa.comic, chapterInfos: [...qa.comic.chapterInfos,
+      { ...qa.comic.chapterInfos[0], chapterId: 104, chapterTitle: '新第4话', isDownloaded: false },
+      { ...qa.comic.chapterInfos[0], chapterId: 105, chapterTitle: '新第5话', isDownloaded: false },
+    ] })
+  })
+  await tab(page, '更新追更').click()
+  await page.getByText('我的追更', { exact: true }).click()
+  await page.getByRole('button', { name: '检查更新', exact: true }).click()
+  await expect(page.getByText('检查完成：2 个可更新章节', { exact: true })).toBeVisible()
+  expect(await page.evaluate(() => window.workflowQa.createdDownloads)).toEqual([])
+  await page.getByRole('checkbox', { name: '新第5话', exact: true }).uncheck()
+  await page.getByRole('button', { name: '下载所选 1 个章节', exact: true }).click()
+  await expect(page.getByText('新第4话 · 已加入队列', { exact: true })).toBeVisible()
+  expect(await page.evaluate(() => window.workflowQa.createdDownloads)).toEqual([104])
+})
+
 test('online page failure is visible and retry reloads the image', async ({ page }) => {
   await page.evaluate(() => {
     const qa = window.workflowQa
