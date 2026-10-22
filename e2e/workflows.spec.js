@@ -111,6 +111,36 @@ test('online continue reading starts at the saved page', async ({ page }) => {
   expect(requested[0]).toBe(3)
 })
 
+test('local reader changes chapters without closing and stops automatic reading at the final chapter', async ({ page }) => {
+  await openLocal(page)
+  const reader = localReader(page)
+  await reader.getByRole('button', { name: '下一章', exact: true }).click()
+  await expect(reader.getByRole('img', { name: /第 1 页$/ })).toHaveAttribute('src', /102/)
+  await reader.getByRole('checkbox', { name: '自动下一章' }).check()
+  await jump(reader, 6)
+  await reader.getByRole('button', { name: '接着读下一章', exact: true }).click()
+  await expect(reader.getByRole('img', { name: /第 1 页$/ })).toHaveAttribute('src', /103/)
+  await jump(reader, 6)
+  await expect(reader.getByRole('button', { name: '下一章', exact: true })).toBeDisabled()
+  await expect(reader.getByRole('button', { name: '下一页', exact: true })).toBeDisabled()
+})
+
+test('display preferences survive chapter changes and restart for the same comic', async ({ page }) => {
+  await openLocal(page)
+  const reader = localReader(page)
+  await reader.getByText('适宽', { exact: true }).click()
+  await reader.getByRole('button', { name: '放大', exact: true }).click()
+  await reader.getByRole('button', { name: '下一章', exact: true }).click()
+  await expect(reader.getByRole('radio', { name: '适宽', exact: true })).toBeChecked()
+  await expect(reader.getByRole('button', { name: '重置缩放' })).toHaveText('125%')
+  await reader.getByRole('img', { name: /第 1 页$/ }).evaluate((image) => image.decode())
+  await page.reload()
+  await tab(page, '阅读记录').click()
+  await page.getByRole('button', { name: '继续阅读', exact: true }).click()
+  await expect(localReader(page).getByRole('radio', { name: '适宽', exact: true })).toBeChecked()
+  await expect(localReader(page).getByRole('button', { name: '重置缩放' })).toHaveText('125%')
+})
+
 test('online page failure is visible and retry reloads the image', async ({ page }) => {
   await page.evaluate(() => {
     const qa = window.workflowQa

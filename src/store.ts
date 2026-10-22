@@ -9,7 +9,9 @@ import {
   GetWeeklyResult,
   SearchResult,
 } from './bindings.ts'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
+import { DISPLAY_KEY, EMPTY_DISPLAYS, displayFor, loadDisplays } from './reader/preferences.ts'
+import type { ReaderDisplays, ReaderFit } from './reader/preferences.ts'
 import { loadReadingHistory, READING_HISTORY_KEY, rememberProgress } from './reader/history.ts'
 import type { ReaderLayout, ReaderMode, ReadingProgress } from './reader/history.ts'
 
@@ -33,13 +35,65 @@ export const useStore = defineStore('store', () => {
   const readingHistory = ref<ReadingProgress[]>([])
   const readingHistoryError = ref('')
   const readerLayout = ref<ReaderLayout>('single')
+  const readerScale = ref(100)
+  const readerFit = ref<ReaderFit>('screen')
+  const readerDisplays = ref<ReaderDisplays>(EMPTY_DISPLAYS)
+  let applyingDisplay = false
+
+  function saveDisplays() {
+    try {
+      window.localStorage.setItem(DISPLAY_KEY, JSON.stringify(readerDisplays.value))
+      readingHistoryError.value = ''
+    } catch (error) {
+      readingHistoryError.value = `显示设置保存失败：${error instanceof Error ? error.message : String(error)}`
+    }
+  }
+  function applyDisplay(comicId: number, fallback: ReaderLayout) {
+    const display = displayFor(readerDisplays.value, comicId, fallback)
+    applyingDisplay = true
+    readerLayout.value = display.layout
+    readerScale.value = display.scale
+    readerFit.value = display.fit
+    applyingDisplay = false
+  }
+  watch([readerLayout, readerScale, readerFit], ([layout, scale, fit]) => {
+    const comic = readerComic.value ?? onlineReaderComic.value
+    if (applyingDisplay || comic === null) return
+    readerDisplays.value = { ...readerDisplays.value, comics: { ...readerDisplays.value.comics, [comic.id]: { layout, scale, fit } } }
+    saveDisplays()
+  }, { flush: 'sync' })
+  function saveDefaultDisplay() {
+    readerDisplays.value = { ...readerDisplays.value, defaults: { layout: readerLayout.value, scale: readerScale.value, fit: readerFit.value } }
+    saveDisplays()
+  }
+  function resetComicDisplay() {
+    const comic = readerComic.value ?? onlineReaderComic.value
+    if (comic === null) return
+    const comics = { ...readerDisplays.value.comics }
+    delete comics[String(comic.id)]
+    readerDisplays.value = { ...readerDisplays.value, comics }
+    applyDisplay(comic.id, 'single')
+    saveDisplays()
+  }
   const readerStartPage = ref(1)
   const readerStartFilename = ref<string | null>(null)
   const onlineReaderStartPage = ref(1)
+  const autoNextChapter = ref(false)
+
+  function setAutoNextChapter(value: boolean) {
+    autoNextChapter.value = value
+    try {
+      window.localStorage.setItem('jmcomic.auto-next-chapter', String(value))
+    } catch (error) {
+      readingHistoryError.value = `自动连读设置保存失败：${error instanceof Error ? error.message : String(error)}`
+    }
+  }
 
   function initializeReadingHistory() {
     try {
+      autoNextChapter.value = window.localStorage.getItem('jmcomic.auto-next-chapter') === 'true'
       readingHistory.value = loadReadingHistory(window.localStorage)
+      readerDisplays.value = loadDisplays(window.localStorage)
       readerLayout.value = readingHistory.value[0]?.layout ?? 'single'
     } catch (error) {
       readingHistoryError.value = error instanceof Error ? error.message : String(error)
@@ -68,7 +122,7 @@ export const useStore = defineStore('store', () => {
     onlineReaderComic.value = null
     readerStartPage.value = progress?.page ?? 1
     readerStartFilename.value = progress?.filename ?? null
-    readerLayout.value = progress?.layout ?? readerLayout.value
+    applyDisplay(comic.id, progress?.layout ?? readerLayout.value)
     readerComic.value = comic
     readerChapterTitle.value = chapter.chapterTitle
     readerChapterId.value = chapter.chapterId
@@ -79,7 +133,7 @@ export const useStore = defineStore('store', () => {
     readerChapterId.value = null
     readerComic.value = null
     onlineReaderStartPage.value = progress?.page ?? 1
-    readerLayout.value = progress?.layout ?? readerLayout.value
+    applyDisplay(comic.id, progress?.layout ?? readerLayout.value)
     onlineReaderComic.value = comic
     onlineReaderChapter.value = chapter
   }
@@ -104,9 +158,15 @@ export const useStore = defineStore('store', () => {
     readingHistory,
     readingHistoryError,
     readerLayout,
+    readerScale,
+    readerFit,
+    saveDefaultDisplay,
+    resetComicDisplay,
     readerStartPage,
     readerStartFilename,
     onlineReaderStartPage,
+    autoNextChapter,
+    setAutoNextChapter,
     initializeReadingHistory,
     recordReadingProgress,
     readingProgress,

@@ -2,8 +2,10 @@
 import { ref, watch } from 'vue'
 import { NButton, NInputNumber, NRadioButton, NRadioGroup } from 'naive-ui'
 import type { ReaderLayout } from './history.ts'
+import { useStore } from '../store.ts'
+const store = useStore()
 
-const props = defineProps<{ page: number; pageCount: number }>()
+const props = defineProps<{ page: number; pageCount: number; advanceChapter?: boolean }>()
 const layout = defineModel<ReaderLayout>('layout', { required: true })
 const scale = defineModel<number>('scale', { required: true })
 const emit = defineEmits<{ navigate: [page: number] }>()
@@ -28,8 +30,8 @@ function jump() {
     <n-button size="small" class="text-white!" :disabled="page <= 1" @click="emit('navigate', page - 1)">
       上一页
     </n-button>
-    <n-button size="small" class="text-white!" :disabled="page >= pageCount" @click="emit('navigate', page + 1)">
-      下一页
+    <n-button size="small" class="text-white!" :disabled="page >= pageCount && !advanceChapter" @click="emit('navigate', page + 1)">
+      {{ page >= pageCount && advanceChapter ? '接着读下一章' : '下一页' }}
     </n-button>
     <div class="flex items-center gap-1">
       <label for="reader-page-number" class="text-sm">页码</label>
@@ -49,6 +51,13 @@ function jump() {
       <n-radio-button value="single">单页</n-radio-button>
       <n-radio-button value="scroll">连续滚动</n-radio-button>
     </n-radio-group>
+    <n-radio-group v-model:value="store.readerFit" size="small" aria-label="图片适配">
+      <n-radio-button value="screen">适屏</n-radio-button>
+      <n-radio-button value="width">适宽</n-radio-button>
+      <n-radio-button value="height">适高</n-radio-button>
+    </n-radio-group>
+    <n-button size="small" class="text-white!" @click="store.saveDefaultDisplay">设为默认</n-button>
+    <n-button size="small" class="text-white!" @click="store.resetComicDisplay">使用默认</n-button>
     <div class="flex items-center gap-1">
       <n-button
         size="small"

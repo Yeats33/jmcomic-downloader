@@ -2,12 +2,15 @@
 import { computed, nextTick, onUnmounted, ref, shallowReactive, watch } from 'vue'
 import { NButton, NSpin } from 'naive-ui'
 import type { ReaderLayout } from './history.ts'
+import { pageWidth } from './preferences.ts'
+import type { ReaderFit } from './preferences.ts'
 
 const props = defineProps<{
   pages: readonly { readonly key: string; readonly url: string }[]
   page: number
   layout: ReaderLayout
   scale: number
+  fit: ReaderFit
   title: string
   loading: boolean
   error: string
@@ -17,8 +20,22 @@ const emit = defineEmits<{
   pageDisplayed: [page: number]
   retry: [page: number]
   imageError: [page: number]
+  chapterEnd: []
 }>()
 const viewport = ref<HTMLElement | null>(null)
+const viewportSize = ref({ width: 600, height: 800 })
+watch(viewport, (root, _previous, onCleanup) => {
+  if (root === null) return
+  const observer = new ResizeObserver(() => {
+    viewportSize.value = { width: Math.max(1, root.clientWidth - 32), height: Math.max(1, root.clientHeight - 32) }
+  })
+  observer.observe(root)
+  onCleanup(() => observer.disconnect())
+})
+function widthFor(key: string) {
+  const fit = props.layout === 'scroll' && props.fit === 'screen' ? 'width' : props.fit
+  return pageWidth(fit, props.scale, ratios.get(key) ?? 0.75, viewportSize.value.width, viewportSize.value.height)
+}
 const ratios = shallowReactive(new Map<string, number>())
 const failed = shallowReactive(new Set<string>())
 const visiblePages = computed(() =>
@@ -29,6 +46,23 @@ const visiblePages = computed(() =>
 let lastReported = 0
 let frame = 0
 let lastDisplayed: { page: number; url: string; layout: ReaderLayout } | undefined
+let forwardScroll = false
+
+function onWheel(event: WheelEvent) {
+  forwardScroll = event.deltaY > 0
+  const root = viewport.value
+  if (forwardScroll && root !== null && root.scrollTop + root.clientHeight >= root.scrollHeight - 2) {
+    reportChapterEnd()
+  }
+}
+
+function reportChapterEnd() {
+  if (!forwardScroll || props.page !== props.pages.length || props.loading || props.error) return
+  const item = props.pages[props.page - 1]
+  if (item === undefined || failed.has(item.key) || lastDisplayed?.page !== props.page) return
+  forwardScroll = false
+  emit('chapterEnd')
+}
 
 function reportDisplayedPage() {
   const item = props.pages[props.page - 1]
@@ -47,6 +81,7 @@ function onScroll() {
     frame = 0
     const root = viewport.value
     if (root === null) return
+    if (root.scrollTop + root.clientHeight >= root.scrollHeight - 2) reportChapterEnd()
     const target = root.getBoundingClientRect().top + root.clientHeight / 3
     const item = [...root.querySelectorAll<HTMLElement>('[data-reader-page]')].find(
       (element) => element.getBoundingClientRect().bottom > target,
@@ -120,6 +155,7 @@ onUnmounted(() => {
     ref="viewport"
     class="reader-viewport flex-1 min-h-0 overflow-auto bg-black p-4"
     :class="{ flex: layout === 'single' }"
+    @wheel.passive="onWheel"
     @scroll.passive="onScroll">
     <div v-if="pages.length === 0" class="m-auto text-center text-gray-3 py-6" role="status">
       <n-spin v-if="loading" size="large" />
@@ -137,7 +173,7 @@ onUnmounted(() => {
       :style="
         layout === 'scroll'
           ? {
-              width: `${scale}%`,
+              width: `${widthFor(item.key)}px`,
               aspectRatio: ratios.get(item.key) ?? 0.75,
             }
           : undefined
@@ -150,7 +186,7 @@ onUnmounted(() => {
         :style="
           layout === 'scroll'
             ? { width: '100%', display: 'block' }
-            : { width: `${scale}%`, maxWidth: 'none', maxHeight: `${scale}%` }
+            : { width: `${widthFor(item.key)}px`, height: 'auto', maxWidth: 'none', maxHeight: 'none' }
         "
         class="object-contain shrink-0 m-auto"
         @load="loaded(item.key, $event)"

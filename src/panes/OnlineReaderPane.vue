@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NButton, NInputNumber, NSelect } from 'naive-ui'
+import { NButton, NCheckbox, NInputNumber, NSelect } from 'naive-ui'
+import { orderedChapters } from '../reader/chapters.ts'
 import { useStore } from '../store.ts'
 import { useOnlinePages } from '../reader/useOnlinePages.ts'
 import ReaderNavigation from '../reader/ReaderNavigation.vue'
@@ -23,11 +24,11 @@ const {
 const pages = computed(() =>
   Array.from({ length: pageCount.value }, (_, index) => ({ key: String(index), url: pageUrls.get(index) ?? '' })),
 )
-const scale = ref(100)
+const scale = computed({ get: () => store.readerScale, set: (value: number) => { store.readerScale = value } })
 const chapterMenuOpen = ref(false)
 const panel = ref<HTMLElement | null>(null)
 let previousFocus: HTMLElement | null = null
-const chapters = computed(() => store.onlineReaderComic?.chapterInfos ?? [])
+const chapters = computed(() => orderedChapters(store.onlineReaderComic?.chapterInfos ?? []))
 const chapterOptions = computed(() =>
   chapters.value.map((chapter) => ({ label: chapter.chapterTitle, value: chapter.chapterId })),
 )
@@ -44,6 +45,13 @@ function selectChapter(id: number) {
 function changeChapter(offset: number) {
   const chapter = chapters.value[chapterIndex.value + offset]
   if (chapter !== undefined) selectChapter(chapter.chapterId)
+}
+function advanceChapter() {
+  if (store.autoNextChapter && !loading.value && !error.value) changeChapter(1)
+}
+function navigate(page: number) {
+  if (page > pageCount.value) advanceChapter()
+  else void showPage(page)
 }
 function close() {
   store.onlineReaderChapter = null
@@ -86,13 +94,12 @@ function keydown(event: KeyboardEvent) {
     void showPage(currentPage.value - 1)
   } else if (!loading.value && event.key === 'ArrowRight') {
     event.preventDefault()
-    void showPage(currentPage.value + 1)
+    navigate(currentPage.value + 1)
   }
 }
 watch(
   chapterId,
   (id) => {
-    scale.value = 100
     if (id !== null) void openChapter(id, store.onlineReaderStartPage)
   },
   { immediate: true },
@@ -145,6 +152,9 @@ onUnmounted(() => {
         aria-label="选择章节"
         @update:value="selectChapter" />
       <span class="text-gray-3 text-sm whitespace-nowrap">{{ currentPage }} / {{ pageCount || '—' }} 页</span>
+      <n-checkbox :checked="store.autoNextChapter" @update:checked="store.setAutoNextChapter">
+        <span class="text-white">自动下一章</span>
+      </n-checkbox>
       <div class="flex items-center gap-1 text-sm whitespace-nowrap" title="提前加载后续页面，0 为关闭；修改后自动保存">
         <label for="online-reader-prefetch">向前缓冲</label>
         <n-input-number
@@ -174,11 +184,13 @@ onUnmounted(() => {
       :page="currentPage"
       :layout="store.readerLayout"
       :scale="scale"
+      :fit="store.readerFit"
       :title="store.onlineReaderChapter?.chapterTitle ?? ''"
       :loading="loading"
       :error="error"
       @visible-page="showPage"
       @page-displayed="rememberPage"
+      @chapter-end="advanceChapter"
       @retry="retry"
       @image-error="invalidatePage" />
     <ReaderNavigation
@@ -186,7 +198,8 @@ onUnmounted(() => {
       v-model:scale="scale"
       :page="currentPage"
       :page-count="pageCount"
-      @navigate="showPage">
+      :advance-chapter="store.autoNextChapter && chapterIndex < chapters.length - 1 && !loading && !error"
+      @navigate="navigate">
       <n-button size="small" class="text-white!" :disabled="chapterIndex <= 0" @click="changeChapter(-1)">
         上一章
       </n-button>

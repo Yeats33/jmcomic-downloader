@@ -20,6 +20,8 @@ Both readers share a ReaderViewport (single page or continuous vertical scrollin
 The inventory toolbar uses labeled search, tag, completeness and sort controls. Filters apply before pagination; changing them clears the visible selection. A result count and an empty state make the filter scope explicit. Context-menu deletion acts on highlighted rows; the toolbar deletion acts on checkboxes. The confirmation names the affected comics.
 
 ## 6. Interaction
+Local and online chapter menus share ordered navigation. Automatic next-chapter is opt-in and only follows a forward page action or a forward scroll at the loaded chapter end. Unavailable local chapters are labeled and disabled. Reader additions use compact labeled controls and wrapping toolbars; thumbnail and bookmark panels are collapsible regions within the reader, not nested modal dialogs. Display settings persist per comic with an explicit action to save a global default. Update and integrity checks show a preview before starting downloads; report partial failures beside the affected item.
+
 Retain arrow-key paging, Escape to close, and zoom controls. Ignore reader shortcuts while typing or choosing a chapter. Respect reduced motion. Closing or switching chapters cancels obsolete transfers and releases image object URLs.
 
 ## 7. Accessibility
