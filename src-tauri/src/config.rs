@@ -80,6 +80,28 @@ impl Config {
         }
     }
 
+    pub fn get_api_domains(&self) -> Vec<String> {
+        let selected = self.get_api_domain();
+        if self.api_domain_mode == ApiDomainMode::Custom {
+            return vec![selected];
+        }
+
+        let mut domains = [
+            API_DOMAIN_1,
+            API_DOMAIN_2,
+            API_DOMAIN_3,
+            API_DOMAIN_4,
+            API_DOMAIN_5,
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+        if let Some(index) = domains.iter().position(|domain| *domain == selected) {
+            domains.rotate_left(index);
+        }
+        domains
+    }
+
     fn merge_config(config_string: &str, app_data_dir: &Path) -> Config {
         let Ok(mut json_value) = serde_json::from_str::<serde_json::Value>(config_string) else {
             return Config::default(app_data_dir);
@@ -138,6 +160,36 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builtin_routes_start_at_the_selected_route_and_wrap_once() {
+        let config = Config::merge_config(r#"{"apiDomainMode":"Domain4"}"#, Path::new("/fixture"));
+
+        let domains = config.get_api_domains();
+
+        assert_eq!(
+            domains,
+            [
+                API_DOMAIN_4,
+                API_DOMAIN_5,
+                API_DOMAIN_1,
+                API_DOMAIN_2,
+                API_DOMAIN_3
+            ]
+        );
+    }
+
+    #[test]
+    fn custom_route_does_not_add_builtin_fallbacks() {
+        let config = Config::merge_config(
+            r#"{"apiDomainMode":"Custom","customApiDomain":"api.example.test:8443"}"#,
+            Path::new("/fixture"),
+        );
+
+        let domains = config.get_api_domains();
+
+        assert_eq!(domains, ["api.example.test:8443"]);
+    }
 
     #[test]
     fn legacy_config_gains_reader_buffer_without_resetting_settings() {
