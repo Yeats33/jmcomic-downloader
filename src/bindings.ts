@@ -215,6 +215,22 @@ async syncFavoriteFolder() : Promise<Result<null, CommandError>> {
 async getDownloadedComics() : Promise<Comic[]> {
     return await TAURI_INVOKE("get_downloaded_comics");
 },
+async inspectChapter(comicId: number, chapterId: number, verifyRemote: boolean) : Promise<Result<ChapterHealth, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("inspect_chapter", { comicId, chapterId, verifyRemote }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async repairChapterPage(comicId: number, chapterId: number, page: number) : Promise<Result<boolean, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("repair_chapter_page", { comicId, chapterId, page }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async exportCbz(comic: Comic) : Promise<Result<null, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("export_cbz", { comic }) };
@@ -340,6 +356,7 @@ export type CategorySubRespData = { id: string | null; title: string | null }
  * 章节中已下载的图片信息(供阅读模式使用)
  */
 export type ChapterDownloadedImgs = { downloadDir: string; downloadedImgs: string[]; totalImgCount: number; isDownloading: boolean }
+export type ChapterHealth = { comicId: number; comicName: string; chapterId: number; chapterTitle: string; expectedPages: number | null; checkedPages: number; issues: PageIssue[]; warning: string | null }
 export type ChapterInfo = { chapterId: number; chapterTitle: string; order: number; 
 /**
  * 是否曾导出过 PDF
@@ -394,6 +411,7 @@ export type LogMetadata = { timestamp: string; level: LogLevel; fields: { [key i
 export type LogSpan = ({ [key in string]: null | boolean | number | string | JsonValue[] | { [key in string]: JsonValue } }) & { name: string }
 export type OnlineChapter = { sessionId: string; pageCount: number }
 export type OnlinePageEvent = { event: "Chunk"; data: number[] } | { event: "Complete"; data: { mime: string; blocks: number } }
+export type PageIssue = { page: number; reason: string; repairable: boolean }
 export type ProxyMode = "System" | "NoProxy" | "Custom"
 export type RelatedListRespData = { id: string; author: string; name: string; image: string }
 export type SearchResult = { searchQuery: string; total: number; content: ComicInSearch[] }

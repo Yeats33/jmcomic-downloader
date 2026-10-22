@@ -111,7 +111,9 @@ test('online continue reading starts at the saved page', async ({ page }) => {
   expect(requested[0]).toBe(3)
 })
 
-test('local reader changes chapters without closing and stops automatic reading at the final chapter', async ({ page }) => {
+test('local reader changes chapters without closing and stops automatic reading at the final chapter', async ({
+  page,
+}) => {
   await openLocal(page)
   const reader = localReader(page)
   await reader.getByRole('button', { name: '下一章', exact: true }).click()
@@ -160,7 +162,10 @@ test('page bookmarks reopen the bookmarked page after reading elsewhere and rest
   await localReader(page).getByRole('button', { name: '关闭本地阅读' }).click()
   await tab(page, '本地库存').click()
   await page.locator('[aria-label="库存阅读状态"]').click()
-  await page.locator('.n-base-select-option').filter({ hasText: /^已读$/ }).click()
+  await page
+    .locator('.n-base-select-option')
+    .filter({ hasText: /^已读$/ })
+    .click()
   await expect(page.locator('.downloaded-pane-selection-container [data-key]')).toHaveCount(1)
 })
 
@@ -170,10 +175,14 @@ test('following persists and update preview downloads only the chosen new chapte
   await expect(page.getByRole('button', { name: '取消追更', exact: true })).toBeVisible()
   await page.evaluate(() => {
     const qa = window.workflowQa
-    qa.updatedComics.set(qa.comic.id, { ...qa.comic, chapterInfos: [...qa.comic.chapterInfos,
-      { ...qa.comic.chapterInfos[0], chapterId: 104, chapterTitle: '新第4话', isDownloaded: false },
-      { ...qa.comic.chapterInfos[0], chapterId: 105, chapterTitle: '新第5话', isDownloaded: false },
-    ] })
+    qa.updatedComics.set(qa.comic.id, {
+      ...qa.comic,
+      chapterInfos: [
+        ...qa.comic.chapterInfos,
+        { ...qa.comic.chapterInfos[0], chapterId: 104, chapterTitle: '新第4话', isDownloaded: false },
+        { ...qa.comic.chapterInfos[0], chapterId: 105, chapterTitle: '新第5话', isDownloaded: false },
+      ],
+    })
   })
   await tab(page, '更新追更').click()
   await page.getByText('我的追更', { exact: true }).click()
@@ -184,6 +193,20 @@ test('following persists and update preview downloads only the chosen new chapte
   await page.getByRole('button', { name: '下载所选 1 个章节', exact: true }).click()
   await expect(page.getByText('新第4话 · 已加入队列', { exact: true })).toBeVisible()
   expect(await page.evaluate(() => window.workflowQa.createdDownloads)).toEqual([104])
+})
+
+test('inventory inspection previews defects and repairs only the selected page', async ({ page }) => {
+  await tab(page, '库存体检').click()
+  await page.getByRole('button', { name: '清空选择', exact: true }).click()
+  await page.getByRole('checkbox', { name: 'Fixture A', exact: true }).check()
+  await page.getByRole('button', { name: '开始检查', exact: true }).click()
+  await expect(page.getByText('检查完成：3 个章节，2 页异常', { exact: true })).toBeVisible()
+  expect(await page.evaluate(() => window.workflowQa.repairedPages)).toEqual([])
+  await page.getByRole('checkbox', { name: '第 4 页：缺少图片', exact: true }).uncheck()
+  await page.getByRole('button', { name: '修复所选 1 页', exact: true }).click()
+  await expect(page.getByText('修复结束：1 页已恢复正常', { exact: true })).toBeVisible()
+  expect(await page.evaluate(() => window.workflowQa.repairedPages)).toEqual([2])
+  await expect(page.getByRole('checkbox', { name: '第 4 页：缺少图片', exact: true })).toBeVisible()
 })
 
 test('online page failure is visible and retry reloads the image', async ({ page }) => {
@@ -305,7 +328,11 @@ test('prioritized queue order survives restart without resuming paused jobs', as
   await page.evaluate(() => {
     const qa = window.workflowQa
     qa.queue = qa.comic.chapterInfos.slice(0, 2).map((chapterInfo) => ({
-      state: 'Paused', comic: qa.comic, chapterInfo, downloadedImgCount: 2, totalImgCount: 6,
+      state: 'Paused',
+      comic: qa.comic,
+      chapterInfo,
+      downloadedImgCount: 2,
+      totalImgCount: 6,
     }))
     localStorage.setItem('fixture-queue', JSON.stringify(qa.queue))
   })

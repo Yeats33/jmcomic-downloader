@@ -17,6 +17,7 @@ import ReaderPane from './panes/ReaderPane.vue'
 import OnlineReaderPane from './panes/OnlineReaderPane.vue'
 import HistoryPane from './panes/HistoryPane.vue'
 import UpdatesPane from './panes/UpdatesPane.vue'
+import IntegrityPane from './panes/IntegrityPane.vue'
 
 const store = useStore()
 
@@ -91,6 +92,9 @@ onMounted(async () => {
       </n-tab-pane>
       <n-tab-pane class="h-full overflow-hidden p-0!" name="updates" tab="更新追更" display-directive="show">
         <UpdatesPane />
+      </n-tab-pane>
+      <n-tab-pane class="h-full overflow-hidden p-0!" name="integrity" tab="库存体检" display-directive="show">
+        <IntegrityPane />
       </n-tab-pane>
     </n-tabs>
     <div class="w-1/2 overflow-auto flex flex-col">

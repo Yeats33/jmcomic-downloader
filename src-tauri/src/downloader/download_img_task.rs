@@ -278,7 +278,7 @@ pub fn calculate_block_num(scramble_id: i64, id: i64, filename: &str) -> u32 {
         src_format = ?src_format
     )
 )]
-async fn save_img(
+pub(crate) async fn save_img(
     image_writes: &super::image_writes::ImageWrites,
     save_path: &Path,
     download_format: DownloadFormat,
@@ -309,6 +309,9 @@ async fn save_img(
         let dst_img = if block_num == 0 {
             src_img
         } else {
+            if block_num > src_img.height() {
+                return Err(eyre::eyre!("图片高度小于分块数，无法还原"));
+            }
             stitch_img(&mut src_img, block_num)
         };
 

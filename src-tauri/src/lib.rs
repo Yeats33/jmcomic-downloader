@@ -13,6 +13,7 @@ use crate::config::Config;
 use crate::downloader::download_manager::DownloadManager;
 use crate::errors::install_custom_eyre_handler;
 use crate::export::ComicExportLock;
+use crate::integrity::{inspect_chapter, repair_chapter_page};
 use crate::jm_client::JmClient;
 use crate::online_reader::{
     close_online_reader, open_online_chapter, start_online_reader, stream_online_page, OnlineReader,
@@ -26,6 +27,7 @@ mod errors;
 mod events;
 mod export;
 mod extensions;
+mod integrity;
 mod jm_client;
 mod logger;
 mod online_reader;
@@ -71,6 +73,8 @@ fn specta_builder() -> tauri_specta::Builder<Wry> {
             show_path_in_file_manager,
             sync_favorite_folder,
             get_downloaded_comics,
+            inspect_chapter,
+            repair_chapter_page,
             export_cbz,
             export_pdf,
             export_cbz_chapters,

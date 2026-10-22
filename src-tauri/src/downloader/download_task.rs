@@ -330,6 +330,13 @@ impl DownloadTask {
             return;
         }
 
+        if let Err(error) = crate::integrity::write_manifest(
+            &self.paths.chapter,
+            total_img_count,
+            self.download_format,
+        ) {
+            tracing::warn!(%error, "页面清单保存失败，可通过联网检查补充总页数");
+        }
         if let Err(err) = self.chapter_info.save_chapter_metadata() {
             let err_title = "保存章节元数据失败";
             let message = err.to_message();

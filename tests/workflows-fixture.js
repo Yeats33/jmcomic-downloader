@@ -57,6 +57,7 @@ const qa = (window.workflowQa = {
   restoreCalls: 0,
   updatedComics: new Map(),
   createdDownloads: [],
+  repairedPages: [],
 })
 const createUrl = URL.createObjectURL.bind(URL)
 const revokeUrl = URL.revokeObjectURL.bind(URL)
@@ -117,7 +118,31 @@ window.__TAURI_INTERNALS__ = {
     if (command === 'get_config') return config
     if (command === 'save_config') return null
     if (command === 'get_comic') return qa.updatedComics.get(args.aid) ?? comic
-    if (command === 'create_download_task') { qa.createdDownloads.push(args.chapterId); return null }
+    if (command === 'create_download_task') {
+      qa.createdDownloads.push(args.chapterId)
+      return null
+    }
+    if (command === 'inspect_chapter')
+      return {
+        comicId: args.comicId,
+        comicName: comic.name,
+        chapterId: args.chapterId,
+        chapterTitle: `章节 ${args.chapterId}`,
+        expectedPages: 6,
+        checkedPages: 6,
+        warning: null,
+        issues:
+          args.chapterId === 101
+            ? [
+                { page: 2, reason: '文件为空', repairable: true },
+                { page: 4, reason: '缺少图片', repairable: true },
+              ]
+            : [],
+      }
+    if (command === 'repair_chapter_page') {
+      qa.repairedPages.push(args.page)
+      return true
+    }
     if (command === 'get_downloaded_comics') return comics.filter((item) => !qa.deleted.includes(item.id))
     if (command === 'delete_downloaded_comic') {
       qa.deleted.push(args.comic.id)
@@ -130,7 +155,11 @@ window.__TAURI_INTERNALS__ = {
       return null
     }
     if (command === 'prioritize_download_task') {
-      qa.queue.sort((left, right) => Number(right.chapterInfo.chapterId === args.chapterId) - Number(left.chapterInfo.chapterId === args.chapterId))
+      qa.queue.sort(
+        (left, right) =>
+          Number(right.chapterInfo.chapterId === args.chapterId) -
+          Number(left.chapterInfo.chapterId === args.chapterId),
+      )
       localStorage.setItem('fixture-queue', JSON.stringify(qa.queue))
       emitDownload({ event: 'QueueOrder', data: { chapterIds: qa.queue.map((task) => task.chapterInfo.chapterId) } })
       return null
@@ -196,8 +225,14 @@ window.__TAURI_INTERNALS__ = {
       return callbackId++
     }
     if (command === 'plugin:event|unlisten') return null
-    if (command === 'start_online_reader') { activeSession = `session-${++sessionId}`; return activeSession }
-    if (command === 'close_online_reader') { if (args.sessionId === activeSession) activeSession = null; return null }
+    if (command === 'start_online_reader') {
+      activeSession = `session-${++sessionId}`
+      return activeSession
+    }
+    if (command === 'close_online_reader') {
+      if (args.sessionId === activeSession) activeSession = null
+      return null
+    }
     if (command === 'open_online_chapter') {
       if (args.sessionId !== activeSession) throw { message: '在线阅读已关闭' }
       return { sessionId: args.sessionId, pageCount: 6 }

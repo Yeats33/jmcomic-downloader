@@ -392,6 +392,7 @@ function useDropdown() {
         </n-button>
       </n-input-group>
       <update-downloaded-comics-button />
+      <n-button size="small" @click="store.currentTabName = 'integrity'">库存体检</n-button>
     </div>
     <div class="grid grid-cols-2 gap-2 p-2">
       <label class="col-span-2 text-sm">
@@ -424,7 +425,10 @@ function useDropdown() {
       </label>
       <label class="text-sm">
         阅读状态
-        <n-select v-model:value="readingStatus" size="small" aria-label="库存阅读状态"
+        <n-select
+          v-model:value="readingStatus"
+          size="small"
+          aria-label="库存阅读状态"
           :options="[{ label: '全部阅读状态', value: 'all' }, ...READING_STATUS_OPTIONS]" />
       </label>
       <span class="text-sm self-end pb-1" role="status">
