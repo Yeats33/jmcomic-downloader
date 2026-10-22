@@ -125,6 +125,17 @@ test('online page failure is visible and retry reloads the image', async ({ page
   await expect(onlineReader(page).getByRole('img', { name: /第 1 页$/ })).toBeVisible()
 })
 
+test('Escape closes the chapter selector before closing the online reader', async ({ page }) => {
+  await openOnline(page)
+  await onlineReader(page).locator('.n-select').click()
+  await expect(page.locator('.n-base-select-menu')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.n-base-select-menu')).toBeHidden()
+  await expect(onlineReader(page)).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(onlineReader(page)).toHaveCount(0)
+})
+
 for (const mode of ['local', 'online'])
   test(`${mode} corrupt image preserves the last readable bookmark`, async ({ page }) => {
     await page.evaluate((mode) => {

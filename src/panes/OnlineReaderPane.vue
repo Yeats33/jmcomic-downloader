@@ -24,6 +24,7 @@ const pages = computed(() =>
   Array.from({ length: pageCount.value }, (_, index) => ({ key: String(index), url: pageUrls.get(index) ?? '' })),
 )
 const scale = ref(100)
+const chapterMenuOpen = ref(false)
 const panel = ref<HTMLElement | null>(null)
 let previousFocus: HTMLElement | null = null
 const chapters = computed(() => store.onlineReaderComic?.chapterInfos ?? [])
@@ -54,7 +55,10 @@ function retry(page = currentPage.value) {
 }
 function keydown(event: KeyboardEvent) {
   if (event.key === 'Escape') {
-    close()
+    event.preventDefault()
+    event.stopPropagation()
+    if (chapterMenuOpen.value) chapterMenuOpen.value = false
+    else close()
     return
   }
   if (event.key === 'Tab') {
@@ -114,10 +118,10 @@ function rememberPage(page: number) {
 onMounted(() => {
   previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
   panel.value?.focus()
-  window.addEventListener('keydown', keydown)
+  window.addEventListener('keydown', keydown, true)
 })
 onUnmounted(() => {
-  window.removeEventListener('keydown', keydown)
+  window.removeEventListener('keydown', keydown, true)
   previousFocus?.focus()
 })
 </script>
@@ -133,6 +137,7 @@ onUnmounted(() => {
     <header class="flex flex-wrap items-center gap-2 px-4 py-3 bg-gray-9 border-b border-gray-7">
       <span class="font-semibold text-sm">在线阅读</span>
       <n-select
+        v-model:show="chapterMenuOpen"
         class="min-w-0 w-64 max-w-full"
         size="small"
         :value="chapterId"
