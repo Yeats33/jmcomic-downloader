@@ -10,7 +10,11 @@ test('per-comic display wins over defaults and survives serialization', () => {
 })
 test('legacy display settings keep saved layout and invalid zoom is rejected', () => {
   expect(displayFor(loadDisplays({ getItem: () => null }), 1, 'scroll').layout).toBe('scroll')
-  expect(() => loadDisplays({ getItem: () => JSON.stringify({ defaults: { layout: 'single', fit: 'width', scale: -1 }, comics: {} }) })).toThrow()
+  expect(() =>
+    loadDisplays({
+      getItem: () => JSON.stringify({ defaults: { layout: 'single', fit: 'width', scale: -1 }, comics: {} }),
+    }),
+  ).toThrow()
 })
 test('fit modes use the viewport dimensions and zoom independently', () => {
   expect(pageWidth('width', 100, 0.5, 1000, 600)).toBe(1000)

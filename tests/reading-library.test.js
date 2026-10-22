@@ -1,7 +1,17 @@
 import { expect, test } from 'bun:test'
 import { parseLibrary, toggleBookmark } from '../src/reader/library.ts'
-const progress = { comicId: 1, comicName: 'Book', chapterId: 2, chapterTitle: 'Chapter', page: 3,
-  pageCount: 10, filename: '0003.jpg', mode: 'local', layout: 'single', updatedAt: 1 }
+const progress = {
+  comicId: 1,
+  comicName: 'Book',
+  chapterId: 2,
+  chapterTitle: 'Chapter',
+  page: 3,
+  pageCount: 10,
+  filename: '0003.jpg',
+  mode: 'local',
+  layout: 'single',
+  updatedAt: 1,
+}
 test('multiple page bookmarks persist independently of the latest reading position', () => {
   const first = toggleBookmark(parseLibrary(null), progress)
   const second = toggleBookmark(first, { ...progress, page: 8, filename: '0008.jpg' })

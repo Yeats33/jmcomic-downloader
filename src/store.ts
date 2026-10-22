@@ -58,14 +58,24 @@ export const useStore = defineStore('store', () => {
     readerFit.value = display.fit
     applyingDisplay = false
   }
-  watch([readerLayout, readerScale, readerFit], ([layout, scale, fit]) => {
-    const comic = readerComic.value ?? onlineReaderComic.value
-    if (applyingDisplay || comic === null) return
-    readerDisplays.value = { ...readerDisplays.value, comics: { ...readerDisplays.value.comics, [comic.id]: { layout, scale, fit } } }
-    saveDisplays()
-  }, { flush: 'sync' })
+  watch(
+    [readerLayout, readerScale, readerFit],
+    ([layout, scale, fit]) => {
+      const comic = readerComic.value ?? onlineReaderComic.value
+      if (applyingDisplay || comic === null) return
+      readerDisplays.value = {
+        ...readerDisplays.value,
+        comics: { ...readerDisplays.value.comics, [comic.id]: { layout, scale, fit } },
+      }
+      saveDisplays()
+    },
+    { flush: 'sync' },
+  )
   function saveDefaultDisplay() {
-    readerDisplays.value = { ...readerDisplays.value, defaults: { layout: readerLayout.value, scale: readerScale.value, fit: readerFit.value } }
+    readerDisplays.value = {
+      ...readerDisplays.value,
+      defaults: { layout: readerLayout.value, scale: readerScale.value, fit: readerFit.value },
+    }
     saveDisplays()
   }
   function resetComicDisplay() {

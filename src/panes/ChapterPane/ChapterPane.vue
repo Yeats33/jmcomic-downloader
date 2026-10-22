@@ -64,7 +64,10 @@ async function showComicDownloadDirInFileManager() {
         v-if="chapterPaneMode === 'download'"
         v-model:chapter-pane-mode="chapterPaneMode"
         :reload="reloadPickedComic" />
-      <ChapterExportPanel v-else-if="chapterPaneMode === 'export'" v-model:chapter-pane-mode="chapterPaneMode" :reload="reloadPickedComic" />
+      <ChapterExportPanel
+        v-else-if="chapterPaneMode === 'export'"
+        v-model:chapter-pane-mode="chapterPaneMode"
+        :reload="reloadPickedComic" />
       <ChapterReadPanel v-else v-model:chapter-pane-mode="chapterPaneMode" />
 
       <div class="flex p-2 pt-0">

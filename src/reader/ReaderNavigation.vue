@@ -30,7 +30,11 @@ function jump() {
     <n-button size="small" class="text-white!" :disabled="page <= 1" @click="emit('navigate', page - 1)">
       上一页
     </n-button>
-    <n-button size="small" class="text-white!" :disabled="page >= pageCount && !advanceChapter" @click="emit('navigate', page + 1)">
+    <n-button
+      size="small"
+      class="text-white!"
+      :disabled="page >= pageCount && !advanceChapter"
+      @click="emit('navigate', page + 1)">
       {{ page >= pageCount && advanceChapter ? '接着读下一章' : '下一页' }}
     </n-button>
     <div class="flex items-center gap-1">

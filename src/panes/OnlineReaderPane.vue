@@ -27,9 +27,18 @@ const {
 const pages = computed(() =>
   Array.from({ length: pageCount.value }, (_, index) => ({ key: String(index), url: pageUrls.get(index) ?? '' })),
 )
-const scale = computed({ get: () => store.readerScale, set: (value: number) => { store.readerScale = value } })
+const scale = computed({
+  get: () => store.readerScale,
+  set: (value: number) => {
+    store.readerScale = value
+  },
+})
 const chapterMenuOpen = ref(false)
 const thumbnailsOpen = ref(false)
+function jumpFromThumbnail(page: number) {
+  void showPage(page)
+  thumbnailsOpen.value = false
+}
 const panel = ref<HTMLElement | null>(null)
 let previousFocus: HTMLElement | null = null
 const chapters = computed(() => orderedChapters(store.onlineReaderComic?.chapterInfos ?? []))
@@ -158,7 +167,13 @@ onUnmounted(() => {
         aria-label="选择章节"
         @update:value="selectChapter" />
       <span class="text-gray-3 text-sm whitespace-nowrap">{{ currentPage }} / {{ pageCount || '—' }} 页</span>
-      <n-button size="small" class="text-white!" :aria-expanded="thumbnailsOpen" @click="thumbnailsOpen = !thumbnailsOpen">页面总览</n-button>
+      <n-button
+        size="small"
+        class="text-white!"
+        :aria-expanded="thumbnailsOpen"
+        @click="thumbnailsOpen = !thumbnailsOpen">
+        页面总览
+      </n-button>
       <n-checkbox :checked="store.autoNextChapter" @update:checked="store.setAutoNextChapter">
         <span class="text-white">自动下一章</span>
       </n-checkbox>
@@ -185,10 +200,16 @@ onUnmounted(() => {
         {{ store.readingHistoryError }}
       </span>
     </header>
-    <ReaderThumbnails v-if="thumbnailsOpen && chapterId !== null" mode="online" :chapter-id="chapterId"
+    <ReaderThumbnails
+      v-if="thumbnailsOpen && chapterId !== null"
+      mode="online"
+      :chapter-id="chapterId"
       :load-preview="previewPage"
-      :page="currentPage" :page-count="pageCount" :pages="pages" @close="thumbnailsOpen = false"
-      @navigate="showPage($event); thumbnailsOpen = false" />
+      :page="currentPage"
+      :page-count="pageCount"
+      :pages="pages"
+      @close="thumbnailsOpen = false"
+      @navigate="jumpFromThumbnail" />
     <ReaderViewport
       :key="chapterId ?? 'closed'"
       :pages="pages"
@@ -211,8 +232,12 @@ onUnmounted(() => {
       :page-count="pageCount"
       :advance-chapter="store.autoNextChapter && chapterIndex < chapters.length - 1 && !loading && !error"
       @navigate="navigate">
-      <ReaderBookmarks v-if="store.onlineReaderComic && chapterId !== null" :comic-id="store.onlineReaderComic.id"
-        :chapter-id="chapterId" :page="currentPage" mode="online" />
+      <ReaderBookmarks
+        v-if="store.onlineReaderComic && chapterId !== null"
+        :comic-id="store.onlineReaderComic.id"
+        :chapter-id="chapterId"
+        :page="currentPage"
+        mode="online" />
       <n-button size="small" class="text-white!" :disabled="chapterIndex <= 0" @click="changeChapter(-1)">
         上一章
       </n-button>

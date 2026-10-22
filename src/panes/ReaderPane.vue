@@ -25,20 +25,31 @@ const source = computed(() =>
 )
 const { pages, filenames, directory, currentPage, totalImgCount, downloading, loading, error, refresh, showPage } =
   useLocalPages(source)
-const scale = computed({ get: () => store.readerScale, set: (value: number) => { store.readerScale = value } })
+const scale = computed({
+  get: () => store.readerScale,
+  set: (value: number) => {
+    store.readerScale = value
+  },
+})
 const panel = ref<HTMLElement | null>(null)
 const chapterMenuOpen = ref(false)
 const thumbnailsOpen = ref(false)
+function jumpFromThumbnail(page: number) {
+  showPage(page)
+  thumbnailsOpen.value = false
+}
 const chapters = computed(() => orderedChapters(store.readerComic?.chapterInfos ?? []))
 const previousChapter = computed(() => adjacentChapter(chapters.value, chapterId.value, -1))
 const nextChapter = computed(() => adjacentChapter(chapters.value, chapterId.value, 1))
 const readable = (chapter: ChapterInfo | undefined) =>
   chapter !== undefined && (chapter.isDownloaded === true || store.progresses.has(chapter.chapterId))
-const chapterOptions = computed(() => chapters.value.map((chapter) => ({
-  label: `${chapter.chapterTitle}${readable(chapter) ? '' : '（未下载）'}`,
-  value: chapter.chapterId,
-  disabled: !readable(chapter),
-})))
+const chapterOptions = computed(() =>
+  chapters.value.map((chapter) => ({
+    label: `${chapter.chapterTitle}${readable(chapter) ? '' : '（未下载）'}`,
+    value: chapter.chapterId,
+    disabled: !readable(chapter),
+  })),
+)
 function selectChapter(id: number) {
   const chapter = chapters.value.find((item) => item.chapterId === id)
   if (chapter !== undefined && readable(chapter) && store.readerComic !== null) {
@@ -46,7 +57,14 @@ function selectChapter(id: number) {
   }
 }
 function advanceChapter() {
-  if (store.autoNextChapter && !loading.value && !error.value && !downloading.value && readable(nextChapter.value) && nextChapter.value !== undefined) {
+  if (
+    store.autoNextChapter &&
+    !loading.value &&
+    !error.value &&
+    !downloading.value &&
+    readable(nextChapter.value) &&
+    nextChapter.value !== undefined
+  ) {
     selectChapter(nextChapter.value.chapterId)
   }
 }
@@ -153,12 +171,24 @@ onUnmounted(() => {
     aria-modal="true"
     aria-label="本地阅读">
     <header class="flex flex-wrap items-center gap-2 px-4 py-3 bg-gray-9 border-b border-gray-7 shrink-0">
-      <n-select v-model:show="chapterMenuOpen" class="w-64 max-w-full" size="small" :value="chapterId"
-        :options="chapterOptions" aria-label="选择章节" @update:value="selectChapter" />
+      <n-select
+        v-model:show="chapterMenuOpen"
+        class="w-64 max-w-full"
+        size="small"
+        :value="chapterId"
+        :options="chapterOptions"
+        aria-label="选择章节"
+        @update:value="selectChapter" />
       <n-checkbox :checked="store.autoNextChapter" @update:checked="store.setAutoNextChapter">
         <span class="text-white">自动下一章</span>
       </n-checkbox>
-      <n-button size="small" class="text-white!" :aria-expanded="thumbnailsOpen" @click="thumbnailsOpen = !thumbnailsOpen">页面总览</n-button>
+      <n-button
+        size="small"
+        class="text-white!"
+        :aria-expanded="thumbnailsOpen"
+        @click="thumbnailsOpen = !thumbnailsOpen">
+        页面总览
+      </n-button>
       <span class="text-gray-3 text-sm whitespace-nowrap">第 {{ currentPage }} / {{ pages.length || '—' }} 页</span>
       <span class="text-gray-3 text-sm whitespace-nowrap">已下载 {{ pages.length }} / {{ totalImgCount }}</span>
       <span v-if="downloading" class="text-sm text-yellow-3">下载中</span>
@@ -170,9 +200,15 @@ onUnmounted(() => {
         {{ store.readingHistoryError }}
       </span>
     </header>
-    <ReaderThumbnails v-if="thumbnailsOpen && chapterId !== null" mode="local" :chapter-id="chapterId"
-      :page="currentPage" :page-count="pages.length" :pages="pages" @close="thumbnailsOpen = false"
-      @navigate="showPage($event); thumbnailsOpen = false" />
+    <ReaderThumbnails
+      v-if="thumbnailsOpen && chapterId !== null"
+      mode="local"
+      :chapter-id="chapterId"
+      :page="currentPage"
+      :page-count="pages.length"
+      :pages="pages"
+      @close="thumbnailsOpen = false"
+      @navigate="jumpFromThumbnail" />
     <ReaderViewport
       :key="chapterId"
       :pages="pages"
@@ -194,13 +230,27 @@ onUnmounted(() => {
       :page-count="pages.length"
       :advance-chapter="store.autoNextChapter && !downloading && readable(nextChapter)"
       @navigate="navigate">
-      <ReaderBookmarks v-if="store.readerComic && chapterId !== null" :comic-id="store.readerComic.id"
-        :chapter-id="chapterId" :page="currentPage" mode="local" />
-      <n-button size="small" class="text-white!" :disabled="!readable(previousChapter)"
-        @click="previousChapter && selectChapter(previousChapter.chapterId)">上一章</n-button>
-      <n-button size="small" class="text-white!" :disabled="!readable(nextChapter)"
+      <ReaderBookmarks
+        v-if="store.readerComic && chapterId !== null"
+        :comic-id="store.readerComic.id"
+        :chapter-id="chapterId"
+        :page="currentPage"
+        mode="local" />
+      <n-button
+        size="small"
+        class="text-white!"
+        :disabled="!readable(previousChapter)"
+        @click="previousChapter && selectChapter(previousChapter.chapterId)">
+        上一章
+      </n-button>
+      <n-button
+        size="small"
+        class="text-white!"
+        :disabled="!readable(nextChapter)"
         :title="nextChapter && !readable(nextChapter) ? '下一章尚未下载' : undefined"
-        @click="nextChapter && selectChapter(nextChapter.chapterId)">下一章</n-button>
+        @click="nextChapter && selectChapter(nextChapter.chapterId)">
+        下一章
+      </n-button>
     </ReaderNavigation>
   </section>
 </template>

@@ -7,9 +7,14 @@ const library = useReadingLibrary()
 <template>
   <label class="flex items-center gap-1 text-sm" @click.stop>
     阅读状态
-    <n-radio-group size="small" aria-label="阅读状态" :value="library.statusFor(comicId)"
+    <n-radio-group
+      size="small"
+      aria-label="阅读状态"
+      :value="library.statusFor(comicId)"
       @update:value="library.setStatus(comicId, $event)">
-      <n-radio-button v-for="option in READING_STATUS_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</n-radio-button>
+      <n-radio-button v-for="option in READING_STATUS_OPTIONS" :key="option.value" :value="option.value">
+        {{ option.label }}
+      </n-radio-button>
     </n-radio-group>
   </label>
 </template>

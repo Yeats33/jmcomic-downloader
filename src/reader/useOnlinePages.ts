@@ -90,11 +90,18 @@ export function useOnlinePages(prefetchPages: Readonly<Ref<number>>) {
     if (cached !== undefined) return Promise.resolve(cached)
     const existing = pending.get(index)
     if (existing !== undefined) return existing
-    const transfer = transferPage(index).then((url) => {
-      if (url && shouldCachePage(index)) { cache.set(index, url); return url }
-      if (url) URL.revokeObjectURL(url)
-      return ''
-    }).finally(() => { if (pending.get(index) === transfer) pending.delete(index) })
+    const transfer = transferPage(index)
+      .then((url) => {
+        if (url && shouldCachePage(index)) {
+          cache.set(index, url)
+          return url
+        }
+        if (url) URL.revokeObjectURL(url)
+        return ''
+      })
+      .finally(() => {
+        if (pending.get(index) === transfer) pending.delete(index)
+      })
     pending.set(index, transfer)
     return transfer
   }

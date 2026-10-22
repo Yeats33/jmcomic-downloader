@@ -13,7 +13,7 @@ const message = useMessage()
 const opening = ref<string | null>(null)
 const library = useReadingLibrary()
 const view = ref<'history' | 'bookmarks'>('history')
-const entries = computed(() => view.value === 'history' ? store.readingHistory : library.bookmarks)
+const entries = computed(() => (view.value === 'history' ? store.readingHistory : library.bookmarks))
 
 async function resume(progress: ReadingProgress) {
   if (opening.value !== null) return
@@ -70,7 +70,10 @@ async function resume(progress: ReadingProgress) {
     <p class="text-sm m-0">自动记住最近 100 条阅读进度，关闭或重启后可继续阅读。</p>
     <n-alert v-if="store.readingHistoryError" type="error" :show-icon="false">{{ store.readingHistoryError }}</n-alert>
     <n-alert v-if="library.error" type="error">{{ library.error }}</n-alert>
-    <n-empty v-if="entries.length === 0" class="my-8" :description="view === 'history' ? '暂无阅读记录，打开一个章节开始阅读' : '暂无书签，在阅读器中点击收藏本页'" />
+    <n-empty
+      v-if="entries.length === 0"
+      class="my-8"
+      :description="view === 'history' ? '暂无阅读记录，打开一个章节开始阅读' : '暂无书签，在阅读器中点击收藏本页'" />
     <div v-else class="min-h-0 overflow-auto flex flex-col gap-2">
       <article
         v-for="entry in entries"

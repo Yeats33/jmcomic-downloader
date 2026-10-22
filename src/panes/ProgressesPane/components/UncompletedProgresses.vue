@@ -26,7 +26,9 @@ async function prioritize(chapterId: number) {
   try {
     const result = await commands.prioritizeDownloadTask(chapterId)
     priorityError.value = result.status === 'error' ? result.error.message : ''
-  } catch (cause) { priorityError.value = cause instanceof Error ? cause.message : String(cause) }
+  } catch (cause) {
+    priorityError.value = cause instanceof Error ? cause.message : String(cause)
+  }
 }
 
 const selectionOptions: PartialSelectionOptions = {
@@ -364,8 +366,13 @@ const UncompletedProgress = defineComponent({
           </NIcon>
           <ProgressContent />
         </div>
-        <NButton size="tiny" disabled={props.p.state === 'Downloading'}
-          onClick={(event: MouseEvent) => { event.stopPropagation(); void prioritize(props.p.chapterInfo.chapterId) }}>
+        <NButton
+          size="tiny"
+          disabled={props.p.state === 'Downloading'}
+          onClick={(event: MouseEvent) => {
+            event.stopPropagation()
+            void prioritize(props.p.chapterInfo.chapterId)
+          }}>
           优先下载
         </NButton>
       </div>
