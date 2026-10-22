@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, shallowReactive, watch } from 'vue'
 import { NButton } from 'naive-ui'
-import { useOnlinePages } from './useOnlinePages.ts'
 import type { ReaderMode } from './history.ts'
 
-const props = defineProps<{ mode: ReaderMode; chapterId: number; page: number; pageCount: number; pages: readonly { url: string }[] }>()
+const props = defineProps<{ mode: ReaderMode; chapterId: number; page: number; pageCount: number; pages: readonly { url: string }[]; loadPreview?: (page: number) => Promise<string> }>()
 const emit = defineEmits<{ navigate: [page: number]; close: [] }>()
 const group = ref(Math.floor((props.page - 1) / 8))
 const revision = ref(0)
@@ -12,7 +11,6 @@ const loading = ref(false)
 const urls = shallowReactive(new Map<number, string>())
 const errors = shallowReactive(new Map<number, string>())
 const ownedUrls = new Set<string>()
-const online = useOnlinePages(ref(0))
 const firstPage = computed(() => group.value * 8 + 1)
 const numbers = computed(() => Array.from({ length: Math.max(0, Math.min(8, props.pageCount - firstPage.value + 1)) }, (_, index) => firstPage.value + index))
 let version = 0
@@ -41,7 +39,6 @@ watch([firstPage, () => props.chapterId, () => props.pageCount, revision], async
   const current = ++version
   clear()
   loading.value = true
-  if (props.mode === 'online') await online.openChapter(props.chapterId, firstPage.value)
   for (const number of numbers.value) {
     if (current !== version) return
     try {
@@ -50,10 +47,11 @@ watch([firstPage, () => props.chapterId, () => props.pageCount, revision], async
         if (url) urls.set(number, url)
         else errors.set(number, '页面尚未下载')
       } else {
-        if (number !== firstPage.value) await online.showPage(number)
-        if (current !== version) return
-        if (online.error.value || !online.imageUrl.value) throw new Error(online.error.value || '预览加载失败')
-        const thumbnail = await smallImage(online.imageUrl.value)
+        const original = await props.loadPreview?.(number)
+        if (!original) throw new Error('预览加载失败')
+        let thumbnail: string
+        try { thumbnail = await smallImage(original) }
+        finally { URL.revokeObjectURL(original) }
         if (current !== version) { URL.revokeObjectURL(thumbnail); return }
         ownedUrls.add(thumbnail)
         urls.set(number, thumbnail)

@@ -22,6 +22,7 @@ const {
   showPage,
   openChapter,
   invalidatePage,
+  previewPage,
 } = useOnlinePages(prefetchPages)
 const pages = computed(() =>
   Array.from({ length: pageCount.value }, (_, index) => ({ key: String(index), url: pageUrls.get(index) ?? '' })),
@@ -185,6 +186,7 @@ onUnmounted(() => {
       </span>
     </header>
     <ReaderThumbnails v-if="thumbnailsOpen && chapterId !== null" mode="online" :chapter-id="chapterId"
+      :load-preview="previewPage"
       :page="currentPage" :page-count="pageCount" :pages="pages" @close="thumbnailsOpen = false"
       @navigate="showPage($event); thumbnailsOpen = false" />
     <ReaderViewport

@@ -43,11 +43,7 @@ export function useOnlinePages(prefetchPages: Readonly<Ref<number>>) {
     imageUrl.value = ''
   }
 
-  function fetchPage(index: number): Promise<string> {
-    const cached = cache.get(index)
-    if (cached !== undefined) return Promise.resolve(cached)
-    const existing = pending.get(index)
-    if (existing !== undefined) return existing
+  function transferPage(index: number, trackProgress = true): Promise<string> {
     const id = sessionId
     const version = generation
     if (id === null) return Promise.reject(new Error('在线阅读已关闭'))
@@ -59,7 +55,7 @@ export function useOnlinePages(prefetchPages: Readonly<Ref<number>>) {
           case 'Chunk':
             if (version !== generation) return
             chunks.push(new Uint8Array(event.data))
-            if (index === currentPage.value - 1) receivedBytes.value += event.data.length
+            if (trackProgress && index === currentPage.value - 1) receivedBytes.value += event.data.length
             break
           case 'Complete':
             channel.onmessage = () => {}
@@ -78,18 +74,27 @@ export function useOnlinePages(prefetchPages: Readonly<Ref<number>>) {
       }, reject)
     })
       .then((url) => {
-        if (version === generation && shouldCachePage(index)) {
-          cache.set(index, url)
-          return url
-        }
+        if (version === generation) return url
         if (url !== '') URL.revokeObjectURL(url)
         return ''
       })
       .finally(() => {
         chunks.length = 0
         channel.onmessage = () => {}
-        if (pending.get(index) === transfer) pending.delete(index)
       })
+    return transfer
+  }
+
+  function fetchPage(index: number): Promise<string> {
+    const cached = cache.get(index)
+    if (cached !== undefined) return Promise.resolve(cached)
+    const existing = pending.get(index)
+    if (existing !== undefined) return existing
+    const transfer = transferPage(index).then((url) => {
+      if (url && shouldCachePage(index)) { cache.set(index, url); return url }
+      if (url) URL.revokeObjectURL(url)
+      return ''
+    }).finally(() => { if (pending.get(index) === transfer) pending.delete(index) })
     pending.set(index, transfer)
     return transfer
   }
@@ -187,5 +192,6 @@ export function useOnlinePages(prefetchPages: Readonly<Ref<number>>) {
     showPage,
     openChapter,
     invalidatePage,
+    previewPage: (page: number) => transferPage(page - 1, false),
   }
 }
