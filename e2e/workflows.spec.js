@@ -159,6 +159,24 @@ for (const mode of ['local', 'online'])
     if (mode === 'online') expect(await page.evaluate(() => window.workflowQa.urls.size)).toBeLessThanOrEqual(3)
   })
 
+test('continuous reading reserves space for images that have not loaded', async ({ page }) => {
+  const pending = []
+  await page.route('**/tests/delayed-image/**', (route) => {
+    pending.push(route)
+  })
+  await page.evaluate(() => {
+    window.workflowQa.deferImages = true
+  })
+  try {
+    await openLocal(page)
+    await localReader(page).getByText('连续滚动', { exact: true }).click()
+    const bounds = await localReader(page).locator('[data-reader-page="6"]').boundingBox()
+    expect(bounds?.height).toBeGreaterThan(0)
+  } finally {
+    for (const route of pending) await route.abort()
+  }
+})
+
 test('inventory filters all pages and clears selection before operating on filtered results', async ({ page }) => {
   await tab(page, '本地库存').click()
   await page.locator('[data-key="90003"] .n-checkbox').click()

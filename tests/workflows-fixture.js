@@ -105,6 +105,7 @@ window.__TAURI_INTERNALS__ = {
     return id
   },
   convertFileSrc(path) {
+    if (qa.deferImages) return `/tests/delayed-image/${path.split('/').at(-1)}`
     if (qa.failedLocalPage && path.endsWith(`/${String(qa.failedLocalPage).padStart(4, '0')}.jpg`))
       return 'data:image/png;base64,AA=='
     return image(path)

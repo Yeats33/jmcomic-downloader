@@ -138,7 +138,7 @@ onUnmounted(() => {
         layout === 'scroll'
           ? {
               width: `${scale}%`,
-              aspectRatio: ratios.get(item.key) ?? (item.url && !failed.has(item.key) ? undefined : 0.75),
+              aspectRatio: ratios.get(item.key) ?? 0.75,
             }
           : undefined
       ">
