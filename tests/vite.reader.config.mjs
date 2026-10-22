@@ -10,6 +10,7 @@ export default async (environment) => ({
       input: {
         app: resolve('index.html'),
         onlineFixture: resolve('tests/online-reader.html'),
+        workflowsFixture: resolve('tests/workflows.html'),
       },
     },
   },
