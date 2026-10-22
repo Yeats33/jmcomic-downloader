@@ -17,7 +17,7 @@ export interface ReadingProgress {
 export const READING_HISTORY_KEY = 'jmcomic.reading-history.v1'
 const HISTORY_LIMIT = 100
 
-function isReadingProgress(value: unknown): value is ReadingProgress {
+export function isReadingProgress(value: unknown): value is ReadingProgress {
   return (
     typeof value === 'object' &&
     value !== null &&

@@ -4,6 +4,7 @@ import { useStore } from '../../../store.ts'
 import { PhBook, PhFilePdf, PhFileZip, PhFolderOpen } from '@phosphor-icons/vue'
 import { NButton, NCheckbox } from 'naive-ui'
 import IconButton from '../../../components/IconButton.vue'
+import ReadingStatusControl from '../../../reader/ReadingStatusControl.vue'
 
 const store = useStore()
 
@@ -85,6 +86,7 @@ async function showComicDownloadDirInFileManager() {
         {{ comic.name }}
       </span>
       <span class="text-red">作者：{{ comic.author }}</span>
+      <ReadingStatusControl :comic-id="comic.id" />
       <div class="flex mt-auto gap-col-2">
         <IconButton title="打开下载目录" @click="showComicDownloadDirInFileManager">
           <PhFolderOpen :size="24" />

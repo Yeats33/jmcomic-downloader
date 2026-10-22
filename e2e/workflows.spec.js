@@ -141,6 +141,29 @@ test('display preferences survive chapter changes and restart for the same comic
   await expect(localReader(page).getByRole('button', { name: '重置缩放' })).toHaveText('125%')
 })
 
+test('page bookmarks reopen the bookmarked page after reading elsewhere and restarting', async ({ page }) => {
+  await openLocal(page)
+  const reader = localReader(page)
+  await jump(reader, 2)
+  await reader.getByRole('button', { name: '收藏本页', exact: true }).click()
+  await jump(reader, 5)
+  await reader.getByRole('button', { name: '收藏本页', exact: true }).click()
+  await reader.getByText('已读', { exact: true }).click()
+  await page.reload()
+  await tab(page, '阅读记录').click()
+  await page.getByText('页面书签', { exact: true }).click()
+  await expect(page.locator('article')).toHaveCount(2)
+  const entry = page.locator('article').filter({ hasText: '第 2 / 6 页' })
+  await expect(entry.getByRole('radio', { name: '已读', exact: true })).toBeChecked()
+  await entry.getByRole('button', { name: '继续阅读', exact: true }).click()
+  await expect(localReader(page).getByRole('img', { name: /第 2 页$/ })).toBeVisible()
+  await localReader(page).getByRole('button', { name: '关闭本地阅读' }).click()
+  await tab(page, '本地库存').click()
+  await page.locator('[aria-label="库存阅读状态"]').click()
+  await page.locator('.n-base-select-option').filter({ hasText: /^已读$/ }).click()
+  await expect(page.locator('.downloaded-pane-selection-container [data-key]')).toHaveCount(1)
+})
+
 test('online page failure is visible and retry reloads the image', async ({ page }) => {
   await page.evaluate(() => {
     const qa = window.workflowQa
@@ -157,7 +180,7 @@ test('online page failure is visible and retry reloads the image', async ({ page
 
 test('Escape closes the chapter selector before closing the online reader', async ({ page }) => {
   await openOnline(page)
-  await onlineReader(page).locator('.n-select').click()
+  await onlineReader(page).locator('[aria-label="选择章节"]').click()
   await expect(page.locator('.n-base-select-menu')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.locator('.n-base-select-menu')).toBeHidden()

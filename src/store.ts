@@ -14,6 +14,7 @@ import { DISPLAY_KEY, EMPTY_DISPLAYS, displayFor, loadDisplays } from './reader/
 import type { ReaderDisplays, ReaderFit } from './reader/preferences.ts'
 import { loadReadingHistory, READING_HISTORY_KEY, rememberProgress } from './reader/history.ts'
 import type { ReaderLayout, ReaderMode, ReadingProgress } from './reader/history.ts'
+import { useReadingLibrary } from './reader/library.ts'
 
 export const useStore = defineStore('store', () => {
   const config = ref<Config>()
@@ -101,6 +102,8 @@ export const useStore = defineStore('store', () => {
   }
 
   function recordReadingProgress(progress: ReadingProgress) {
+    const library = useReadingLibrary()
+    if (library.statusFor(progress.comicId) === 'unread') library.setStatus(progress.comicId, 'reading')
     readingHistory.value = rememberProgress(readingHistory.value, progress)
     try {
       window.localStorage.setItem(READING_HISTORY_KEY, JSON.stringify(readingHistory.value))
@@ -116,8 +119,8 @@ export const useStore = defineStore('store', () => {
     )
   }
 
-  function openLocalReader(comic: Comic, chapter: ChapterInfo) {
-    const progress = readingProgress(comic.id, chapter.chapterId, 'local')
+  function openLocalReader(comic: Comic, chapter: ChapterInfo, position?: ReadingProgress) {
+    const progress = position ?? readingProgress(comic.id, chapter.chapterId, 'local')
     onlineReaderChapter.value = null
     onlineReaderComic.value = null
     readerStartPage.value = progress?.page ?? 1
@@ -128,8 +131,8 @@ export const useStore = defineStore('store', () => {
     readerChapterId.value = chapter.chapterId
   }
 
-  function openOnlineReader(comic: Comic, chapter: ChapterInfo) {
-    const progress = readingProgress(comic.id, chapter.chapterId, 'online')
+  function openOnlineReader(comic: Comic, chapter: ChapterInfo, position?: ReadingProgress) {
+    const progress = position ?? readingProgress(comic.id, chapter.chapterId, 'online')
     readerChapterId.value = null
     readerComic.value = null
     onlineReaderStartPage.value = progress?.page ?? 1

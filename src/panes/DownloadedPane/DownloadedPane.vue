@@ -23,6 +23,8 @@ import { PhChecks, PhCheck, PhX, PhTrash } from '@phosphor-icons/vue'
 import UpdateDownloadedComicsButton from './components/UpdateDownloadedComicsButton.vue'
 import { filterInventory } from '../../inventory.ts'
 import type { InventoryStatus, InventorySort } from '../../inventory.ts'
+import { READING_STATUS_OPTIONS, useReadingLibrary } from '../../reader/library.ts'
+import type { ReadingStatus } from '../../reader/library.ts'
 
 const store = useStore()
 const dialog = useDialog()
@@ -42,6 +44,8 @@ const query = ref('')
 const tag = ref<string | null>(null)
 const inventoryStatus = ref<InventoryStatus>('all')
 const sort = ref<InventorySort>('title')
+const readingStatus = ref<ReadingStatus | 'all'>('all')
+const readingLibrary = useReadingLibrary()
 const tagOptions = computed(() =>
   [...new Set(store.downloadedComics.flatMap((comic) => comic.tags))]
     .sort((left, right) => left.localeCompare(right, 'zh-CN'))
@@ -64,7 +68,7 @@ const filteredComics = computed(() =>
     tag: tag.value,
     status: inventoryStatus.value,
     sort: sort.value,
-  }),
+  }).filter((comic) => readingStatus.value === 'all' || readingLibrary.statusFor(comic.id) === readingStatus.value),
 )
 // 当前页码
 const currentPage = ref<number>(1)
@@ -88,10 +92,10 @@ watchEffect(() => {
   }
 })
 
-watch([query, tag, inventoryStatus, sort], () => {
+watch([query, tag, inventoryStatus, sort, readingStatus], () => {
   currentPage.value = 1
 })
-watch([currentPage, query, tag, inventoryStatus, sort], () => {
+watch([currentPage, query, tag, inventoryStatus, sort, readingStatus], () => {
   selectedIds.value.clear()
   checkedIds.value.clear()
   selectionAreaRef.value?.selection?.clearSelection()
@@ -417,6 +421,11 @@ function useDropdown() {
       <label class="text-sm">
         排序
         <n-select v-model:value="sort" size="small" :options="sortOptions" aria-label="库存排序" />
+      </label>
+      <label class="text-sm">
+        阅读状态
+        <n-select v-model:value="readingStatus" size="small" aria-label="库存阅读状态"
+          :options="[{ label: '全部阅读状态', value: 'all' }, ...READING_STATUS_OPTIONS]" />
       </label>
       <span class="text-sm self-end pb-1" role="status">
         {{ filteredComics.length }} / {{ store.downloadedComics.length }} 部

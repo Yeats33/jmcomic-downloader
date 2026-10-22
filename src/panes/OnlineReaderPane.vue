@@ -6,6 +6,7 @@ import { useStore } from '../store.ts'
 import { useOnlinePages } from '../reader/useOnlinePages.ts'
 import ReaderNavigation from '../reader/ReaderNavigation.vue'
 import ReaderViewport from '../reader/ReaderViewport.vue'
+import ReaderBookmarks from '../reader/ReaderBookmarks.vue'
 
 const store = useStore()
 const prefetchPages = computed(() => store.config?.onlineReaderPrefetchPages ?? 1)
@@ -200,6 +201,8 @@ onUnmounted(() => {
       :page-count="pageCount"
       :advance-chapter="store.autoNextChapter && chapterIndex < chapters.length - 1 && !loading && !error"
       @navigate="navigate">
+      <ReaderBookmarks v-if="store.onlineReaderComic && chapterId !== null" :comic-id="store.onlineReaderComic.id"
+        :chapter-id="chapterId" :page="currentPage" mode="online" />
       <n-button size="small" class="text-white!" :disabled="chapterIndex <= 0" @click="changeChapter(-1)">
         上一章
       </n-button>

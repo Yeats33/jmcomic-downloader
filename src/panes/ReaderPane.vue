@@ -8,6 +8,7 @@ import { useStore } from '../store.ts'
 import { useLocalPages } from '../reader/useLocalPages.ts'
 import ReaderNavigation from '../reader/ReaderNavigation.vue'
 import ReaderViewport from '../reader/ReaderViewport.vue'
+import ReaderBookmarks from '../reader/ReaderBookmarks.vue'
 
 const store = useStore()
 const chapterId = computed(() => store.readerChapterId)
@@ -185,6 +186,8 @@ onUnmounted(() => {
       :page-count="pages.length"
       :advance-chapter="store.autoNextChapter && !downloading && readable(nextChapter)"
       @navigate="navigate">
+      <ReaderBookmarks v-if="store.readerComic && chapterId !== null" :comic-id="store.readerComic.id"
+        :chapter-id="chapterId" :page="currentPage" mode="local" />
       <n-button size="small" class="text-white!" :disabled="!readable(previousChapter)"
         @click="previousChapter && selectChapter(previousChapter.chapterId)">上一章</n-button>
       <n-button size="small" class="text-white!" :disabled="!readable(nextChapter)"
