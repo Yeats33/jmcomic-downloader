@@ -280,6 +280,14 @@ pub fn restore_download_queue(app: AppHandle) -> CommandResult<()> {
         .map_err(|error| CommandError::from("恢复下载队列失败", error))
 }
 
+#[tauri::command(async)]
+#[specta::specta]
+pub fn prioritize_download_task(app: AppHandle, chapter_id: i64) -> CommandResult<()> {
+    app.get_download_manager()
+        .prioritize(chapter_id)
+        .map_err(|error| CommandError::from("调整下载顺序失败", error))
+}
+
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command(async)]
 #[specta::specta]

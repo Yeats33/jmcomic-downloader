@@ -53,7 +53,9 @@ let unListenDownloadEvent: (() => void) | undefined
 onMounted(async () => {
   await events.downloadEvent
     .listen(async ({ payload: { event, data } }) => {
-      if (event === 'Speed') {
+      if (event === 'QueueOrder') {
+        store.downloadOrder = data.chapterIds
+      } else if (event === 'Speed') {
         downloadSpeed.value = data.speed
       } else if (event === 'Sleeping') {
         const progressData = store.progresses.get(data.chapterId)

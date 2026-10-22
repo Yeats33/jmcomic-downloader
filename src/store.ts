@@ -23,6 +23,7 @@ export const useStore = defineStore('store', () => {
   const pickedComic = ref<Comic>()
   const currentTabName = ref<CurrentTabName>('search')
   const progresses = ref<Map<number, ProgressData>>(new Map())
+  const downloadOrder = ref<number[]>([])
   const getFavoriteResult = ref<GetFavoriteResult>()
   const searchResult = ref<SearchResult>()
   const progressesPaneTabName = ref<ProgressesPaneTabName>('uncompleted')
@@ -148,6 +149,7 @@ export const useStore = defineStore('store', () => {
     pickedComic,
     currentTabName,
     progresses,
+    downloadOrder,
     getFavoriteResult,
     searchResult,
     progressesPaneTabName,

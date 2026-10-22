@@ -117,6 +117,7 @@ impl DownloadManager {
         for task in tasks.values() {
             task.emit_download_task_create_event();
         }
+        self.emit_queue_order();
         if errors.is_empty() {
             Ok(())
         } else {
@@ -171,6 +172,7 @@ impl DownloadManager {
 
             tasks.insert(*chapter_id, task);
         }
+        self.emit_queue_order();
     }
 
     async fn emit_download_speed_loop(app: AppHandle, byte_per_sec: Arc<AtomicU64>) {
@@ -217,7 +219,27 @@ impl DownloadManager {
 
         tasks.insert(chapter_id, task);
 
+        self.emit_queue_order();
+
         Ok(())
+    }
+
+    pub fn prioritize(&self, chapter_id: i64) -> eyre::Result<()> {
+        self.queue()?.prioritize(chapter_id)?;
+        self.emit_queue_order();
+        Ok(())
+    }
+
+    fn emit_queue_order(&self) {
+        match self.queue() {
+            Ok(queue) => {
+                let chapter_ids = queue.entries().iter().map(|task| task.chapter_id).collect();
+                if let Err(error) = (DownloadEvent::QueueOrder { chapter_ids }).emit(&self.app) {
+                    tracing::warn!(%error, "发送下载顺序失败");
+                }
+            }
+            Err(error) => tracing::warn!(%error, "读取下载顺序失败"),
+        }
     }
 
     #[instrument(level = "error", skip_all, fields(chapter_id = chapter_id))]

@@ -300,3 +300,18 @@ test('restored paused queue is displayed and can resume then pause across reload
   await page.reload()
   await expect(page.getByText('已暂停 2/6', { exact: true })).toBeVisible()
 })
+
+test('prioritized queue order survives restart without resuming paused jobs', async ({ page }) => {
+  await page.evaluate(() => {
+    const qa = window.workflowQa
+    qa.queue = qa.comic.chapterInfos.slice(0, 2).map((chapterInfo) => ({
+      state: 'Paused', comic: qa.comic, chapterInfo, downloadedImgCount: 2, totalImgCount: 6,
+    }))
+    localStorage.setItem('fixture-queue', JSON.stringify(qa.queue))
+  })
+  await page.reload()
+  await page.locator('[data-download-id="102"]').getByRole('button', { name: '优先下载', exact: true }).click()
+  await page.reload()
+  await expect(page.locator('[data-download-id]').first()).toHaveAttribute('data-download-id', '102')
+  await expect(page.getByText('已暂停 2/6', { exact: true })).toHaveCount(2)
+})

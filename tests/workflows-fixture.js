@@ -2,6 +2,7 @@ const callbacks = new Map()
 const listeners = new Map()
 let callbackId = 1
 let sessionId = 0
+let activeSession = null
 const image = (label) =>
   `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="600" height="900"><rect width="600" height="900" fill="#dce9ef"/><text x="50" y="150" font-size="36" fill="#1c3b4a">${label}</text><rect x="50" y="250" width="500" height="500" fill="#8aafbc"/></svg>`)}`
 const chapters = [101, 102, 103].map((chapterId, index) => ({
@@ -125,6 +126,13 @@ window.__TAURI_INTERNALS__ = {
     if (command === 'restore_download_queue') {
       qa.restoreCalls++
       for (const data of qa.queue) emitDownload({ event: 'TaskCreate', data })
+      emitDownload({ event: 'QueueOrder', data: { chapterIds: qa.queue.map((task) => task.chapterInfo.chapterId) } })
+      return null
+    }
+    if (command === 'prioritize_download_task') {
+      qa.queue.sort((left, right) => Number(right.chapterInfo.chapterId === args.chapterId) - Number(left.chapterInfo.chapterId === args.chapterId))
+      localStorage.setItem('fixture-queue', JSON.stringify(qa.queue))
+      emitDownload({ event: 'QueueOrder', data: { chapterIds: qa.queue.map((task) => task.chapterInfo.chapterId) } })
       return null
     }
     if (command === 'resume_download_task' || command === 'pause_download_task') {
@@ -188,10 +196,14 @@ window.__TAURI_INTERNALS__ = {
       return callbackId++
     }
     if (command === 'plugin:event|unlisten') return null
-    if (command === 'start_online_reader') return `session-${++sessionId}`
-    if (command === 'close_online_reader') return null
-    if (command === 'open_online_chapter') return { sessionId: args.sessionId, pageCount: 6 }
+    if (command === 'start_online_reader') { activeSession = `session-${++sessionId}`; return activeSession }
+    if (command === 'close_online_reader') { if (args.sessionId === activeSession) activeSession = null; return null }
+    if (command === 'open_online_chapter') {
+      if (args.sessionId !== activeSession) throw { message: '在线阅读已关闭' }
+      return { sessionId: args.sessionId, pageCount: 6 }
+    }
     if (command === 'stream_online_page') {
+      if (args.sessionId !== activeSession) throw { message: '在线阅读已关闭' }
       qa.requests.push({ command, page: args.pageIndex })
       if (qa.failPage === args.pageIndex) throw { err_title: '网络错误', message: '测试页面加载失败' }
       const canvas = document.createElement('canvas')

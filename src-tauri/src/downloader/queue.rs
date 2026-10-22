@@ -1,4 +1,5 @@
-use std::{collections::BTreeMap, fs::File, io::Write, path::PathBuf};
+use std::{collections::BTreeMap, fs::File, io::Write, path::PathBuf, sync::Arc};
+use tokio::sync::{watch, OwnedSemaphorePermit, Semaphore};
 
 use eyre::{eyre, WrapErr};
 use parking_lot::Mutex;
@@ -17,6 +18,8 @@ pub struct QueuedDownload {
     pub format: DownloadFormat,
     pub state: DownloadTaskState,
     pub total_img_count: u32,
+    #[serde(default)]
+    pub position: u64,
 }
 
 pub struct QueueCheckpoint<'a> {
@@ -48,11 +51,12 @@ struct QueueFile {
 pub struct DownloadQueue {
     path: PathBuf,
     tasks: Mutex<BTreeMap<i64, QueuedDownload>>,
+    changed: watch::Sender<()>,
 }
 
 impl DownloadQueue {
     pub fn open(path: PathBuf) -> eyre::Result<Self> {
-        let tasks = match std::fs::read(&path) {
+        let mut tasks = match std::fs::read(&path) {
             Ok(bytes) => {
                 let saved: QueueFile =
                     serde_json::from_slice(&bytes).wrap_err("下载队列文件损坏，原文件已保留")?;
@@ -71,22 +75,42 @@ impl DownloadQueue {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
             Err(error) => return Err(error.into()),
         };
+        let mut position = tasks.values().map(|task| task.position).max().unwrap_or(0);
+        for task in tasks.values_mut().filter(|task| task.position == 0) {
+            position = position
+                .checked_add(1)
+                .ok_or_else(|| eyre!("下载队列顺序溢出"))?;
+            task.position = position;
+        }
         Ok(Self {
             path,
             tasks: Mutex::new(tasks),
+            changed: watch::channel(()).0,
         })
     }
 
     pub fn entries(&self) -> Vec<QueuedDownload> {
-        self.tasks.lock().values().cloned().collect()
+        let mut tasks: Vec<_> = self.tasks.lock().values().cloned().collect();
+        tasks.sort_by_key(|task| (task.position, task.chapter_id));
+        tasks
     }
 
-    pub fn insert(&self, task: QueuedDownload) -> eyre::Result<()> {
+    pub fn insert(&self, mut task: QueuedDownload) -> eyre::Result<()> {
         let mut tasks = self.tasks.lock();
+        if task.position == 0 {
+            task.position = tasks
+                .values()
+                .map(|entry| entry.position)
+                .max()
+                .unwrap_or(0)
+                .checked_add(1)
+                .ok_or_else(|| eyre!("下载队列顺序溢出"))?;
+        }
         let mut next = tasks.clone();
         next.insert(task.chapter_id, task);
         self.save(&next)?;
         *tasks = next;
+        self.changed.send_replace(());
         Ok(())
     }
 
@@ -115,7 +139,82 @@ impl DownloadQueue {
         }
         self.save(&next)?;
         *tasks = next;
+        self.changed.send_replace(());
         Ok(())
+    }
+
+    pub fn prioritize(&self, chapter_id: i64) -> eyre::Result<()> {
+        let mut tasks = self.tasks.lock();
+        if !tasks.contains_key(&chapter_id) {
+            return Err(eyre!("下载任务已结束或不存在"));
+        }
+        let mut ordered: Vec<_> = tasks.values().cloned().collect();
+        ordered.sort_by_key(|task| {
+            (
+                task.chapter_id != chapter_id,
+                task.position,
+                task.chapter_id,
+            )
+        });
+        let mut next = BTreeMap::new();
+        for (index, mut task) in ordered.into_iter().enumerate() {
+            task.position = u64::try_from(index)?
+                .checked_add(1)
+                .ok_or_else(|| eyre!("下载队列顺序溢出"))?;
+            next.insert(task.chapter_id, task);
+        }
+        self.save(&next)?;
+        *tasks = next;
+        self.changed.send_replace(());
+        Ok(())
+    }
+
+    fn next_pending(tasks: &BTreeMap<i64, QueuedDownload>) -> Option<&QueuedDownload> {
+        tasks
+            .values()
+            .filter(|task| task.state == DownloadTaskState::Pending)
+            .min_by_key(|task| (task.position, task.chapter_id))
+    }
+
+    fn claim(&self, chapter_id: i64, task_id: &str) -> eyre::Result<bool> {
+        let mut tasks = self.tasks.lock();
+        if !Self::next_pending(&tasks)
+            .is_some_and(|task| task.chapter_id == chapter_id && task.task_id == task_id)
+        {
+            return Ok(false);
+        }
+        let mut next = tasks.clone();
+        if let Some(task) = next.get_mut(&chapter_id) {
+            task.state = DownloadTaskState::Downloading;
+        }
+        self.save(&next)?;
+        *tasks = next;
+        self.changed.send_replace(());
+        Ok(true)
+    }
+
+    pub async fn acquire(
+        &self,
+        chapter_id: i64,
+        task_id: &str,
+        slots: Arc<Semaphore>,
+    ) -> eyre::Result<OwnedSemaphorePermit> {
+        let mut changed = self.changed.subscribe();
+        loop {
+            let first = Self::next_pending(&self.tasks.lock())
+                .is_some_and(|task| task.chapter_id == chapter_id && task.task_id == task_id);
+            if first {
+                tokio::select! {
+                    permit = Arc::clone(&slots).acquire_owned() => {
+                        let permit = permit.wrap_err("下载调度已关闭")?;
+                        if self.claim(chapter_id, task_id)? { return Ok(permit); }
+                    }
+                    result = changed.changed() => { result.wrap_err("下载队列已关闭")?; }
+                }
+            } else {
+                changed.changed().await.wrap_err("下载队列已关闭")?;
+            }
+        }
     }
 
     fn save(&self, tasks: &BTreeMap<i64, QueuedDownload>) -> eyre::Result<()> {

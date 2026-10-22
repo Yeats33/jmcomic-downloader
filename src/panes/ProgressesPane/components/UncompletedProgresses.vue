@@ -3,7 +3,7 @@ import { ProgressData } from '../../../types.ts'
 import { ref, watchEffect, computed, nextTick, useTemplateRef, defineComponent, PropType } from 'vue'
 import { PartialSelectionOptions, SelectionArea, SelectionEvent } from '@viselect/vue'
 import { commands } from '../../../bindings.ts'
-import { DropdownOption, NButton, NDropdown, NIcon, NProgress, ProgressProps, useDialog } from 'naive-ui'
+import { DropdownOption, NAlert, NButton, NDropdown, NIcon, NProgress, ProgressProps, useDialog } from 'naive-ui'
 import { useStore } from '../../../store.ts'
 import {
   PhPause,
@@ -17,6 +17,17 @@ import {
 
 const store = useStore()
 const dialog = useDialog()
+const priorityError = ref('')
+const queuePosition = (id: number) => {
+  const index = store.downloadOrder.indexOf(id)
+  return index === -1 ? Number.MAX_SAFE_INTEGER : index
+}
+async function prioritize(chapterId: number) {
+  try {
+    const result = await commands.prioritizeDownloadTask(chapterId)
+    priorityError.value = result.status === 'error' ? result.error.message : ''
+  } catch (cause) { priorityError.value = cause instanceof Error ? cause.message : String(cause) }
+}
 
 const selectionOptions: PartialSelectionOptions = {
   selectables: '.selectable',
@@ -30,7 +41,7 @@ const selectableRefs = useTemplateRef('selectableRefs')
 const uncompletedProgresses = computed<[number, ProgressData][]>(() =>
   Array.from(store.progresses.entries())
     .filter(([, { state }]) => state !== 'Completed' && state !== 'Cancelled')
-    .sort((a, b) => b[1].totalImgCount - a[1].totalImgCount),
+    .sort((a, b) => queuePosition(a[0]) - queuePosition(b[0]) || a[0] - b[0]),
 )
 
 watchEffect(() => {
@@ -329,6 +340,7 @@ const UncompletedProgress = defineComponent({
 
     return () => (
       <div
+        data-download-id={props.p.chapterInfo.chapterId}
         class={[
           'selectable p-3 mb-2 rounded-lg',
           selectedIds.value.has(props.p.chapterInfo.chapterId) ? 'selected shadow-md' : 'hover:bg-gray-1',
@@ -352,6 +364,10 @@ const UncompletedProgress = defineComponent({
           </NIcon>
           <ProgressContent />
         </div>
+        <NButton size="tiny" disabled={props.p.state === 'Downloading'}
+          onClick={(event: MouseEvent) => { event.stopPropagation(); void prioritize(props.p.chapterInfo.chapterId) }}>
+          优先下载
+        </NButton>
       </div>
     )
   },
@@ -360,6 +376,8 @@ const UncompletedProgress = defineComponent({
 
 <template>
   <div class="uncompleted-progresses-selection-container h-full flex flex-col px-2" @contextmenu="showDropdown">
+    <n-alert v-if="priorityError" type="error">{{ priorityError }}</n-alert>
+    <p class="text-sm text-gray-6 m-0 mb-2">优先下载会调整排队顺序，正在下载的任务继续，暂停状态不变。</p>
     <div class="flex items-center gap-2 pb-2 select-none">
       <span class="text-sm text-gray-500">左键拖动进行框选，右键打开菜单，双击暂停/继续</span>
       <n-button class="ml-auto" size="small" @click="pauseAllDownloads">暂停全部</n-button>

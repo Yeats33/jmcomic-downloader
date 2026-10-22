@@ -13,6 +13,8 @@ use crate::{
 #[serde(tag = "event", content = "data")]
 pub enum DownloadEvent {
     #[serde(rename_all = "camelCase")]
+    QueueOrder { chapter_ids: Vec<i64> },
+    #[serde(rename_all = "camelCase")]
     Speed { speed: String },
 
     #[serde(rename_all = "camelCase")]

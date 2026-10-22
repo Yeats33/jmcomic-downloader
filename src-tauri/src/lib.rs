@@ -54,6 +54,7 @@ fn specta_builder() -> tauri_specta::Builder<Wry> {
             create_download_task,
             create_download_tasks,
             restore_download_queue,
+            prioritize_download_task,
             get_chapter_downloaded_imgs,
             open_online_chapter,
             start_online_reader,

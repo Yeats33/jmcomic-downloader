@@ -11,7 +11,7 @@ use eyre::{eyre, OptionExt, WrapErr};
 use tauri::AppHandle;
 use tauri_specta::Event;
 use tokio::{
-    sync::{watch, Mutex, OwnedSemaphorePermit, SemaphorePermit},
+    sync::{watch, Mutex, OwnedSemaphorePermit},
     task::JoinSet,
     time::sleep,
 };
@@ -80,6 +80,7 @@ impl DownloadTask {
                 format,
                 state: DownloadTaskState::Pending,
                 total_img_count: 0,
+                position: 0,
             },
         )
     }
@@ -497,7 +498,7 @@ impl DownloadTask {
     }
 
     #[instrument(level = "error", skip_all)]
-    async fn acquire_chapter_permit<'a>(&'a self, permit: &mut Option<SemaphorePermit<'a>>) {
+    async fn acquire_chapter_permit(&self, permit: &mut Option<OwnedSemaphorePermit>) {
         tracing::debug!("章节开始排队");
 
         self.emit_download_task_update_event();
@@ -505,13 +506,13 @@ impl DownloadTask {
         *permit = match permit.take() {
             Some(permit) => Some(permit),
             None => match self
-                .app
-                .get_download_manager()
-                .inner()
-                .chapter_sem
-                .acquire()
+                .queue
+                .acquire(
+                    self.chapter_info.chapter_id,
+                    &self.task_id,
+                    Arc::clone(&self.app.get_download_manager().chapter_sem),
+                )
                 .await
-                .map_err(eyre::Report::from)
             {
                 Ok(permit) => Some(permit),
                 Err(err) => {
@@ -526,22 +527,19 @@ impl DownloadTask {
             },
         };
 
+        let _guard = self.state_change.lock();
         if *self.state_sender.borrow() != DownloadTaskState::Pending {
+            permit.take();
             return;
         }
-
-        if let Err(err) = self.change_state(DownloadTaskState::Downloading) {
-            let err_title = "发送状态`Downloading`失败";
-            let message = err.to_message();
-            tracing::error!(err_title, message);
-            self.set_state(DownloadTaskState::Failed);
-        }
+        self.state_sender
+            .send_replace(DownloadTaskState::Downloading);
     }
 
     #[instrument(level = "error", skip_all)]
-    async fn handle_state_change<'a>(
-        &'a self,
-        permit: &mut Option<SemaphorePermit<'a>>,
+    async fn handle_state_change(
+        &self,
+        permit: &mut Option<OwnedSemaphorePermit>,
         state_receiver: &mut watch::Receiver<DownloadTaskState>,
     ) {
         self.emit_download_task_update_event();
@@ -561,7 +559,7 @@ impl DownloadTask {
     }
 
     #[instrument(level = "error", skip_all)]
-    async fn handle_delete_receiver_change<'a>(&'a self, permit: &mut Option<SemaphorePermit<'a>>) {
+    async fn handle_delete_receiver_change(&self, permit: &mut Option<OwnedSemaphorePermit>) {
         if permit.is_some() {
             sleep(Duration::from_millis(100)).await;
         }
@@ -681,10 +679,7 @@ impl DownloadTask {
 /// 任务进入`Paused`/`Failed`/`Cancelled`状态时，需要释放持有中的章节下载permit
 ///
 /// 不释放的话，其他章节就再也拿不到permit(表现为所有章节都卡在`排队中`)
-fn release_permit_if_needed<'a>(
-    state: DownloadTaskState,
-    permit: &mut Option<SemaphorePermit<'a>>,
-) {
+fn release_permit_if_needed(state: DownloadTaskState, permit: &mut Option<OwnedSemaphorePermit>) {
     let should_release = match state {
         DownloadTaskState::Paused | DownloadTaskState::Failed | DownloadTaskState::Cancelled => {
             true
@@ -703,20 +698,23 @@ fn release_permit_if_needed<'a>(
 
 #[cfg(test)]
 mod tests {
-    use tokio::sync::Semaphore;
+    use std::sync::Arc;
+    use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
     use super::{release_permit_if_needed, DownloadTaskState};
 
     /// 模拟`process()`中的章节permit: 任务下载时持有permit
-    fn acquire_permit<'a>(semaphore: &'a Semaphore) -> tokio::sync::SemaphorePermit<'a> {
-        semaphore.try_acquire().expect("应该能拿到permit")
+    fn acquire_permit(semaphore: &Arc<Semaphore>) -> OwnedSemaphorePermit {
+        Arc::clone(semaphore)
+            .try_acquire_owned()
+            .expect("应该能拿到permit")
     }
 
     #[tokio::test]
     async fn cancelled_task_releases_the_chapter_permit() {
         // 回归测试: 取消下载的任务必须释放章节permit，
         // 否则被取消的任务会永久占用一个下载槽位，其他章节全部卡在`排队中`
-        let semaphore = Semaphore::new(1);
+        let semaphore = Arc::new(Semaphore::new(1));
         let mut permit = Some(acquire_permit(&semaphore));
 
         release_permit_if_needed(DownloadTaskState::Cancelled, &mut permit);
@@ -730,7 +728,7 @@ mod tests {
 
     #[tokio::test]
     async fn failed_task_releases_the_chapter_permit() {
-        let semaphore = Semaphore::new(1);
+        let semaphore = Arc::new(Semaphore::new(1));
         let mut permit = Some(acquire_permit(&semaphore));
 
         release_permit_if_needed(DownloadTaskState::Failed, &mut permit);
@@ -741,7 +739,7 @@ mod tests {
 
     #[tokio::test]
     async fn paused_task_releases_the_chapter_permit() {
-        let semaphore = Semaphore::new(1);
+        let semaphore = Arc::new(Semaphore::new(1));
         let mut permit = Some(acquire_permit(&semaphore));
 
         release_permit_if_needed(DownloadTaskState::Paused, &mut permit);
@@ -752,7 +750,7 @@ mod tests {
 
     #[tokio::test]
     async fn downloading_task_keeps_the_chapter_permit() {
-        let semaphore = Semaphore::new(1);
+        let semaphore = Arc::new(Semaphore::new(1));
         let mut permit = Some(acquire_permit(&semaphore));
 
         release_permit_if_needed(DownloadTaskState::Downloading, &mut permit);

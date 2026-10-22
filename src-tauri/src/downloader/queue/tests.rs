@@ -1,7 +1,95 @@
 use super::*;
 use crate::types::ChapterInfo;
+use std::{
+    future::Future,
+    task::{Context, Waker},
+};
 
 struct Fixture(PathBuf);
+
+#[tokio::test]
+async fn priority_controls_actual_slot_acquisition_and_survives_restart() {
+    let fixture = Fixture::new();
+    let queue = DownloadQueue::open(fixture.path()).unwrap();
+    let first = fixture.task(1, DownloadTaskState::Pending);
+    let second = fixture.task(2, DownloadTaskState::Pending);
+    let paused = fixture.task(3, DownloadTaskState::Paused);
+    queue.insert(first.clone()).unwrap();
+    queue.insert(second.clone()).unwrap();
+    queue.insert(paused).unwrap();
+    queue.prioritize(3).unwrap();
+    queue.prioritize(2).unwrap();
+    drop(queue);
+
+    let queue = Arc::new(DownloadQueue::open(fixture.path()).unwrap());
+    assert_eq!(
+        queue
+            .entries()
+            .iter()
+            .map(|task| task.chapter_id)
+            .collect::<Vec<_>>(),
+        vec![2, 3, 1]
+    );
+    assert_eq!(queue.entries()[1].state, DownloadTaskState::Paused);
+    let slots = Arc::new(Semaphore::new(1));
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let run = |task: QueuedDownload| {
+        let queue = Arc::clone(&queue);
+        let slots = Arc::clone(&slots);
+        let observed = Arc::clone(&observed);
+        async move {
+            let permit = queue
+                .acquire(task.chapter_id, &task.task_id, slots)
+                .await
+                .unwrap();
+            observed.lock().push(task.chapter_id);
+            drop(permit);
+        }
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        tokio::join!(run(first), run(second));
+    })
+    .await
+    .unwrap();
+    assert_eq!(*observed.lock(), vec![2, 1]);
+}
+
+#[tokio::test]
+async fn reorder_wakes_a_waiter_blocked_on_an_occupied_slot() {
+    let fixture = Fixture::new();
+    let queue = Arc::new(DownloadQueue::open(fixture.path()).unwrap());
+    let first = fixture.task(1, DownloadTaskState::Pending);
+    let second = fixture.task(2, DownloadTaskState::Pending);
+    queue.insert(first.clone()).unwrap();
+    queue.insert(second.clone()).unwrap();
+    let slots = Arc::new(Semaphore::new(0));
+    let first_acquire = queue.acquire(1, &first.task_id, Arc::clone(&slots));
+    let second_acquire = queue.acquire(2, &second.task_id, Arc::clone(&slots));
+    tokio::pin!(first_acquire, second_acquire);
+    let mut context = Context::from_waker(Waker::noop());
+    assert!(first_acquire.as_mut().poll(&mut context).is_pending());
+    assert!(second_acquire.as_mut().poll(&mut context).is_pending());
+    queue.prioritize(2).unwrap();
+    slots.add_permits(1);
+    let observed = Mutex::new(Vec::new());
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        tokio::join!(
+            async {
+                let permit = first_acquire.await.unwrap();
+                observed.lock().push(1);
+                drop(permit);
+            },
+            async {
+                let permit = second_acquire.await.unwrap();
+                observed.lock().push(2);
+                drop(permit);
+            }
+        );
+    })
+    .await
+    .unwrap();
+    assert_eq!(*observed.lock(), vec![2, 1]);
+}
 impl Fixture {
     fn new() -> Self {
         let root =
@@ -20,6 +108,7 @@ impl Fixture {
             root: self.0.join("original-downloads"),
             format: DownloadFormat::Png,
             total_img_count: 12,
+            position: 0,
             comic: Comic {
                 id: 10,
                 name: "Fixture comic".into(),
