@@ -57,7 +57,7 @@ async function inspect() {
       if (stopRequested.value) break
       progress.value = `正在检查 ${index + 1} / ${chapters.length}：${chapter.chapterTitle}`
       try {
-        const result = await commands.inspectChapter(comic.id, chapter.chapterId, verifyRemote.value)
+        const result = await commands.inspectChapter(comic, chapter.chapterId, verifyRemote.value)
         if (result.status === 'error')
           errors.value.push(`${comic.name} / ${chapter.chapterTitle}：${result.error.message}`)
         else {
@@ -80,13 +80,18 @@ async function repair() {
   errors.value = []
   repaired.value = 0
   try {
-    for (const report of reports.value)
+    for (const report of reports.value) {
+      const comic = comics.value.find((item) => item.id === report.comicId)
       for (const issue of [...report.issues]) {
         if (stopRequested.value) return
         if (!issue.repairable || !selectedPages.value.has(key(report, issue.page))) continue
+        if (comic === undefined) {
+          errors.value.push(`${report.chapterTitle} 第 ${issue.page} 页：本地库存中找不到这部漫画，请重新检查`)
+          continue
+        }
         progress.value = `正在修复：${report.chapterTitle} 第 ${issue.page} 页`
         try {
-          const result = await commands.repairChapterPage(report.comicId, report.chapterId, issue.page)
+          const result = await commands.repairChapterPage(comic, report.chapterId, issue.page)
           if (result.status === 'error')
             errors.value.push(`${report.chapterTitle} 第 ${issue.page} 页：${result.error.message}`)
           else {
@@ -98,6 +103,7 @@ async function repair() {
           errors.value.push(cause instanceof Error ? cause.message : String(cause))
         }
       }
+    }
   } finally {
     repairing.value = false
     progress.value = `${stopRequested.value ? '修复已停止' : '修复结束'}：${repaired.value} 页已恢复正常`

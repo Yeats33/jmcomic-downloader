@@ -262,6 +262,14 @@ impl DownloadManager {
         if task.process_finished() {
             return Err(eyre!("下载任务已取消，请重新创建下载任务"));
         }
+        // 已在排队或下载的任务无需继续。下载中的任务仍持有槽位、不会重新认领，
+        // 写回`Pending`会让队列一直把它当作队首，挡住后面的任务
+        if matches!(
+            *task.state_sender.borrow(),
+            DownloadTaskState::Pending | DownloadTaskState::Downloading
+        ) {
+            return Ok(());
+        }
         task.change_state(DownloadTaskState::Pending)?;
         Ok(())
     }

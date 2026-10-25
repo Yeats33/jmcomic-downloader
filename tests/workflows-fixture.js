@@ -122,10 +122,11 @@ window.__TAURI_INTERNALS__ = {
       qa.createdDownloads.push(args.chapterId)
       return null
     }
-    if (command === 'inspect_chapter')
+    if (command === 'inspect_chapter') {
+      if (!Number.isInteger(args.comic?.id)) throw new Error('inspect_chapter 需要完整的漫画信息')
       return {
-        comicId: args.comicId,
-        comicName: comic.name,
+        comicId: args.comic.id,
+        comicName: args.comic.name,
         chapterId: args.chapterId,
         chapterTitle: `章节 ${args.chapterId}`,
         expectedPages: 6,
@@ -139,7 +140,9 @@ window.__TAURI_INTERNALS__ = {
               ]
             : [],
       }
+    }
     if (command === 'repair_chapter_page') {
+      if (!Number.isInteger(args.comic?.id)) throw new Error('repair_chapter_page 需要完整的漫画信息')
       qa.repairedPages.push(args.page)
       return true
     }

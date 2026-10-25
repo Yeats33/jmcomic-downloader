@@ -81,6 +81,7 @@ impl DownloadTask {
                 state: DownloadTaskState::Pending,
                 total_img_count: 0,
                 position: 0,
+                attached: false,
             },
         )
     }
@@ -254,7 +255,7 @@ impl DownloadTask {
             let message = err.to_message();
             tracing::error!(err_title, message);
 
-            self.set_state(DownloadTaskState::Failed);
+            self.finish(DownloadTaskState::Failed);
             self.emit_download_task_update_event();
 
             return;
@@ -267,7 +268,7 @@ impl DownloadTask {
                 let message = err.to_message();
                 tracing::error!(err_title, message);
 
-                self.set_state(DownloadTaskState::Failed);
+                self.finish(DownloadTaskState::Failed);
                 self.emit_download_task_update_event();
 
                 return;
@@ -279,13 +280,14 @@ impl DownloadTask {
         };
 
         let Ok(total) = u32::try_from(urls_with_block_num.len()) else {
-            self.set_state(DownloadTaskState::Failed);
+            self.finish(DownloadTaskState::Failed);
             self.emit_download_task_update_event();
             return;
         };
         self.total_img_count.store(total, Ordering::Relaxed);
         self.downloaded_img_count.store(0, Ordering::Relaxed);
-        self.set_state(DownloadTaskState::Downloading);
+        self.save_progress();
+        self.emit_download_task_update_event();
 
         let Some(temp_download_dir) = self.create_temp_download_dir() else {
             return;
@@ -313,7 +315,7 @@ impl DownloadTask {
                     .to_message();
             tracing::error!(err_title, message);
 
-            self.set_state(DownloadTaskState::Failed);
+            self.finish(DownloadTaskState::Failed);
             self.emit_download_task_update_event();
 
             return;
@@ -324,7 +326,7 @@ impl DownloadTask {
             let message = err.to_message();
             tracing::error!(err_title, message);
 
-            self.set_state(DownloadTaskState::Failed);
+            self.finish(DownloadTaskState::Failed);
             self.emit_download_task_update_event();
 
             return;
@@ -346,7 +348,7 @@ impl DownloadTask {
         self.sleep_between_chapter().await;
         tracing::info!("章节下载成功");
 
-        self.set_state(DownloadTaskState::Completed);
+        self.finish(DownloadTaskState::Completed);
         self.emit_download_task_update_event();
     }
 
@@ -379,7 +381,7 @@ impl DownloadTask {
                 let message = err.to_message();
                 tracing::error!(err_title, message);
 
-                self.set_state(DownloadTaskState::Failed);
+                self.finish(DownloadTaskState::Failed);
                 self.emit_download_task_update_event();
 
                 return None;
@@ -391,7 +393,7 @@ impl DownloadTask {
             let message = err.to_message();
             tracing::error!(err_title, message);
 
-            self.set_state(DownloadTaskState::Failed);
+            self.finish(DownloadTaskState::Failed);
             self.emit_download_task_update_event();
 
             return None;
@@ -440,7 +442,7 @@ impl DownloadTask {
                 let message = err.to_message();
                 tracing::error!(err_title, message);
 
-                self.set_state(DownloadTaskState::Failed);
+                self.finish(DownloadTaskState::Failed);
                 self.emit_download_task_update_event();
 
                 return None;
@@ -608,14 +610,40 @@ impl DownloadTask {
 
     pub(super) fn change_state(&self, state: DownloadTaskState) -> eyre::Result<()> {
         let _guard = self.state_change.lock();
-        self.queue.update(QueueCheckpoint {
+        self.queue.update(self.checkpoint(state))?;
+        self.state_sender.send_replace(state);
+        Ok(())
+    }
+
+    /// 下载流程以`Failed`/`Completed`结束，只在任务仍处于`Downloading`时生效。
+    /// 同时发生的暂停或取消优先，否则被取消的任务会以`Failed`留下，却已不在下载队列中
+    fn finish(&self, state: DownloadTaskState) {
+        let _guard = self.state_change.lock();
+        if *self.state_sender.borrow() != DownloadTaskState::Downloading {
+            return;
+        }
+        if let Err(error) = self.queue.update(self.checkpoint(state)) {
+            tracing::error!(err_title = "保存下载队列失败", message = %error);
+        }
+        self.state_sender.send_replace(state);
+    }
+
+    /// 保存总页数供重启后显示。不改变任务状态，以免覆盖同时发生的暂停或取消
+    fn save_progress(&self) {
+        let _guard = self.state_change.lock();
+        let state = *self.state_sender.borrow();
+        if let Err(error) = self.queue.update(self.checkpoint(state)) {
+            tracing::warn!(err_title = "保存下载进度失败", message = %error);
+        }
+    }
+
+    fn checkpoint(&self, state: DownloadTaskState) -> QueueCheckpoint<'_> {
+        QueueCheckpoint {
             task_id: &self.task_id,
             chapter_id: self.chapter_info.chapter_id,
             state,
             total_img_count: self.total_img_count.load(Ordering::Relaxed),
-        })?;
-        self.state_sender.send_replace(state);
-        Ok(())
+        }
     }
 
     /// 获取当前任务中已下载的图片信息(供阅读模式使用)

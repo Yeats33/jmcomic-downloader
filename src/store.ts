@@ -9,7 +9,7 @@ import {
   GetWeeklyResult,
   SearchResult,
 } from './bindings.ts'
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { DISPLAY_KEY, EMPTY_DISPLAYS, displayFor, loadDisplays } from './reader/preferences.ts'
 import type { ReaderDisplays, ReaderFit } from './reader/preferences.ts'
 import { loadReadingHistory, READING_HISTORY_KEY, rememberProgress } from './reader/history.ts'
@@ -35,19 +35,30 @@ export const useStore = defineStore('store', () => {
   const onlineReaderComic = ref<Comic | null>(null)
   const onlineReaderChapter = ref<ChapterInfo | null>(null)
   const readingHistory = ref<ReadingProgress[]>([])
-  const readingHistoryError = ref('')
+  const readingLoadError = ref('')
+  const readingSaveError = ref('')
+  const readingHistoryError = computed(() =>
+    [readingLoadError.value, readingSaveError.value].filter((message) => message !== '').join('；'),
+  )
+  // 无法解析的阅读记录或显示设置会原样保留，不再写回，与书签、追更列表一致
+  let historyLoaded = false
+  let displaysLoaded = false
   const readerLayout = ref<ReaderLayout>('single')
   const readerScale = ref(100)
   const readerFit = ref<ReaderFit>('screen')
   const readerDisplays = ref<ReaderDisplays>(EMPTY_DISPLAYS)
   let applyingDisplay = false
 
+  function messageOf(error: unknown) {
+    return error instanceof Error ? error.message : String(error)
+  }
   function saveDisplays() {
+    if (!displaysLoaded) return
     try {
       window.localStorage.setItem(DISPLAY_KEY, JSON.stringify(readerDisplays.value))
-      readingHistoryError.value = ''
+      readingSaveError.value = ''
     } catch (error) {
-      readingHistoryError.value = `显示设置保存失败：${error instanceof Error ? error.message : String(error)}`
+      readingSaveError.value = `显示设置保存失败：${messageOf(error)}`
     }
   }
   function applyDisplay(comicId: number, fallback: ReaderLayout) {
@@ -97,30 +108,41 @@ export const useStore = defineStore('store', () => {
     try {
       window.localStorage.setItem('jmcomic.auto-next-chapter', String(value))
     } catch (error) {
-      readingHistoryError.value = `自动连读设置保存失败：${error instanceof Error ? error.message : String(error)}`
+      readingSaveError.value = `自动连读设置保存失败：${messageOf(error)}`
     }
   }
 
   function initializeReadingHistory() {
+    const errors: string[] = []
+    historyLoaded = false
+    displaysLoaded = false
     try {
       autoNextChapter.value = window.localStorage.getItem('jmcomic.auto-next-chapter') === 'true'
       readingHistory.value = loadReadingHistory(window.localStorage)
-      readerDisplays.value = loadDisplays(window.localStorage)
       readerLayout.value = readingHistory.value[0]?.layout ?? 'single'
+      historyLoaded = true
     } catch (error) {
-      readingHistoryError.value = error instanceof Error ? error.message : String(error)
+      errors.push(messageOf(error))
     }
+    try {
+      readerDisplays.value = loadDisplays(window.localStorage)
+      displaysLoaded = true
+    } catch (error) {
+      errors.push(messageOf(error))
+    }
+    readingLoadError.value = errors.join('；')
   }
 
   function recordReadingProgress(progress: ReadingProgress) {
     const library = useReadingLibrary()
     if (library.statusFor(progress.comicId) === 'unread') library.setStatus(progress.comicId, 'reading')
     readingHistory.value = rememberProgress(readingHistory.value, progress)
+    if (!historyLoaded) return
     try {
       window.localStorage.setItem(READING_HISTORY_KEY, JSON.stringify(readingHistory.value))
-      readingHistoryError.value = ''
+      readingSaveError.value = ''
     } catch (error) {
-      readingHistoryError.value = `阅读进度保存失败：${error instanceof Error ? error.message : String(error)}`
+      readingSaveError.value = `阅读进度保存失败：${messageOf(error)}`
     }
   }
 

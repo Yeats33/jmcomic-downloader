@@ -215,17 +215,17 @@ async syncFavoriteFolder() : Promise<Result<null, CommandError>> {
 async getDownloadedComics() : Promise<Comic[]> {
     return await TAURI_INVOKE("get_downloaded_comics");
 },
-async inspectChapter(comicId: number, chapterId: number, verifyRemote: boolean) : Promise<Result<ChapterHealth, CommandError>> {
+async inspectChapter(comic: Comic, chapterId: number, verifyRemote: boolean) : Promise<Result<ChapterHealth, CommandError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("inspect_chapter", { comicId, chapterId, verifyRemote }) };
+    return { status: "ok", data: await TAURI_INVOKE("inspect_chapter", { comic, chapterId, verifyRemote }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async repairChapterPage(comicId: number, chapterId: number, page: number) : Promise<Result<boolean, CommandError>> {
+async repairChapterPage(comic: Comic, chapterId: number, page: number) : Promise<Result<boolean, CommandError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("repair_chapter_page", { comicId, chapterId, page }) };
+    return { status: "ok", data: await TAURI_INVOKE("repair_chapter_page", { comic, chapterId, page }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

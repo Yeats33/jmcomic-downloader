@@ -20,6 +20,10 @@ pub struct QueuedDownload {
     pub total_img_count: u32,
     #[serde(default)]
     pub position: u64,
+    /// 本次运行中已有对应的下载任务(由`insert`设置)。
+    /// 尚未恢复或恢复失败的条目不参与调度，否则会让排在后面的任务永远等待。
+    #[serde(skip)]
+    pub attached: bool,
 }
 
 pub struct QueueCheckpoint<'a> {
@@ -97,6 +101,7 @@ impl DownloadQueue {
 
     pub fn insert(&self, mut task: QueuedDownload) -> eyre::Result<()> {
         let mut tasks = self.tasks.lock();
+        task.attached = true;
         if task.position == 0 {
             task.position = tasks
                 .values()
@@ -172,7 +177,7 @@ impl DownloadQueue {
     fn next_pending(tasks: &BTreeMap<i64, QueuedDownload>) -> Option<&QueuedDownload> {
         tasks
             .values()
-            .filter(|task| task.state == DownloadTaskState::Pending)
+            .filter(|task| task.attached && task.state == DownloadTaskState::Pending)
             .min_by_key(|task| (task.position, task.chapter_id))
     }
 

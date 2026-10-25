@@ -1,5 +1,5 @@
 use crate::{
-    cleanup, commands,
+    cleanup,
     downloader::{
         download_img_task::{calculate_block_num, save_img},
         download_task_state::DownloadTaskState,
@@ -144,20 +144,25 @@ fn inspect_pages(directory: &Path, expected: Option<u32>) -> eyre::Result<(u32, 
 
 fn local_chapter(
     app: &AppHandle,
-    comic_id: i64,
+    comic: &Comic,
     chapter_id: i64,
-) -> eyre::Result<(PathBuf, PathBuf, Comic, ChapterInfo)> {
-    let comic = commands::get_downloaded_comics(app.clone())
-        .into_iter()
-        .find(|comic| comic.id == comic_id)
-        .ok_or_eyre("本地库存中找不到这部漫画")?;
+) -> eyre::Result<(PathBuf, PathBuf, ChapterInfo)> {
+    let root = app.get_config().read().download_dir.clone();
+    chapter_directory(&root, comic, chapter_id)
+}
+
+/// 只信任当前下载目录内、属于该章节的下载目录，不重新扫描整个库存
+fn chapter_directory(
+    root: &Path,
+    comic: &Comic,
+    chapter_id: i64,
+) -> eyre::Result<(PathBuf, PathBuf, ChapterInfo)> {
     let chapter = comic
         .chapter_infos
         .iter()
         .find(|chapter| chapter.chapter_id == chapter_id)
         .cloned()
         .ok_or_eyre("找不到章节")?;
-    let root = app.get_config().read().download_dir.clone();
     let directory = chapter
         .chapter_download_dir
         .as_ref()
@@ -168,11 +173,16 @@ fn local_chapter(
     {
         return Err(eyre!("不能检查符号链接目录"));
     }
-    let directory = cleanup::resolve_strictly_inside(directory, &root)?;
+    let directory = cleanup::resolve_strictly_inside(directory, root)?;
+    // 过期或错误的漫画信息不能把检查和修复引到其他目录
+    let saved = std::fs::read(directory.join("章节元数据.json")).wrap_err("章节尚未下载完成")?;
+    let saved: ChapterInfo = serde_json::from_slice(&saved).wrap_err("章节元数据无效")?;
+    if saved.chapter_id != chapter_id {
+        return Err(eyre!("章节目录与章节不符，请重新检查"));
+    }
     Ok((
-        cleanup::canonicalize_allow_missing(&root)?,
+        cleanup::canonicalize_allow_missing(root)?,
         directory,
-        comic,
         chapter,
     ))
 }
@@ -198,23 +208,21 @@ fn downloadable_names(names: Vec<String>) -> eyre::Result<Vec<String>> {
 #[specta::specta]
 pub async fn inspect_chapter(
     app: AppHandle,
-    comic_id: i64,
+    comic: Comic,
     chapter_id: i64,
     verify_remote: bool,
 ) -> CommandResult<ChapterHealth> {
-    inspect(&app, comic_id, chapter_id, verify_remote)
+    inspect(&app, comic, chapter_id, verify_remote)
         .await
         .map_err(|error| CommandError::from("检查库存失败", error))
 }
 async fn inspect(
     app: &AppHandle,
-    comic_id: i64,
+    comic: Comic,
     chapter_id: i64,
     verify_remote: bool,
 ) -> eyre::Result<ChapterHealth> {
-    let lookup = app.clone();
-    let (_root, directory, comic, chapter) =
-        tokio::task::spawn_blocking(move || local_chapter(&lookup, comic_id, chapter_id)).await??;
+    let (_root, directory, chapter) = local_chapter(app, &comic, chapter_id)?;
     let mut warning = None;
     let mut expected = match tokio::fs::read(directory.join("页面清单.json")).await {
         Ok(bytes) => match serde_json::from_slice::<PageManifest>(&bytes) {
@@ -246,7 +254,7 @@ async fn inspect(
     let (checked_pages, issues) =
         tokio::task::spawn_blocking(move || inspect_pages(&directory, expected)).await??;
     Ok(ChapterHealth {
-        comic_id,
+        comic_id: comic.id,
         comic_name: comic.name,
         chapter_id,
         chapter_title: chapter.chapter_title,
@@ -345,15 +353,15 @@ fn repair_format(
 #[specta::specta]
 pub async fn repair_chapter_page(
     app: AppHandle,
-    comic_id: i64,
+    comic: Comic,
     chapter_id: i64,
     page: u32,
 ) -> CommandResult<bool> {
-    repair(&app, comic_id, chapter_id, page)
+    repair(&app, &comic, chapter_id, page)
         .await
         .map_err(|error| CommandError::from("修复页面失败", error))
 }
-async fn repair(app: &AppHandle, comic_id: i64, chapter_id: i64, page: u32) -> eyre::Result<bool> {
+async fn repair(app: &AppHandle, comic: &Comic, chapter_id: i64, page: u32) -> eyre::Result<bool> {
     if page == 0 {
         return Err(eyre!("页码必须大于零"));
     }
@@ -374,9 +382,7 @@ async fn repair(app: &AppHandle, comic_id: i64, chapter_id: i64, page: u32) -> e
     {
         return Err(eyre!("该章节仍有下载任务，请先取消任务后再修复"));
     }
-    let lookup = app.clone();
-    let (root, directory, _comic, _chapter) =
-        tokio::task::spawn_blocking(move || local_chapter(&lookup, comic_id, chapter_id)).await??;
+    let (root, directory, _chapter) = local_chapter(app, comic, chapter_id)?;
     let client = app.get_jm_client().inner().clone();
     let (remote, scramble) = tokio::try_join!(
         client.get_chapter(chapter_id),
@@ -451,6 +457,7 @@ async fn repair(app: &AppHandle, comic_id: i64, chapter_id: i64, page: u32) -> e
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::downloader::download_manager::read_downloaded_imgs_from_dir;
     fn fixture() -> PathBuf {
         let path = std::env::temp_dir().join(format!("jmcomic-integrity-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&path).unwrap();
@@ -493,6 +500,50 @@ mod tests {
         png(&temporary);
         assert!(!install_repaired_page(&root, 1, &temporary, "png").unwrap());
         assert_eq!(std::fs::read(root.join("0001.png")).unwrap(), good);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn only_the_chapters_own_directory_is_checked() {
+        let root = fixture();
+        let directory = root.join("comic/1");
+        std::fs::create_dir_all(&directory).unwrap();
+        let chapter = ChapterInfo {
+            chapter_id: 1,
+            chapter_download_dir: Some(directory.clone()),
+            ..ChapterInfo::default()
+        };
+        let comic = Comic {
+            chapter_infos: vec![chapter.clone()],
+            ..Comic::default()
+        };
+        let metadata = directory.join("章节元数据.json");
+
+        assert!(chapter_directory(&root, &comic, 1).is_err());
+        let other = ChapterInfo {
+            chapter_id: 2,
+            ..ChapterInfo::default()
+        };
+        std::fs::write(&metadata, serde_json::to_vec(&other).unwrap()).unwrap();
+        assert!(chapter_directory(&root, &comic, 1).is_err());
+        std::fs::write(&metadata, serde_json::to_vec(&chapter).unwrap()).unwrap();
+        let (_, resolved, _) = chapter_directory(&root, &comic, 1).unwrap();
+
+        assert_eq!(resolved, directory.canonicalize().unwrap());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn repair_backups_are_not_listed_as_chapter_pages() {
+        let root = fixture();
+        png(&root.join("0001.png"));
+        std::fs::write(root.join("0002.png"), b"bad").unwrap();
+        let temporary = root.join(".replacement.png");
+        png(&temporary);
+        assert!(install_repaired_page(&root, 2, &temporary, "png").unwrap());
+
+        // 阅读器按图片扩展名列出章节页面，修复留下的隐藏备份不能混进去
+        let pages = read_downloaded_imgs_from_dir(&root, false).unwrap();
+
+        assert_eq!(pages, ["0001.png", "0002.png"]);
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]

@@ -31,6 +31,10 @@ async fn priority_controls_actual_slot_acquisition_and_survives_restart() {
         vec![2, 3, 1]
     );
     assert_eq!(queue.entries()[1].state, DownloadTaskState::Paused);
+    // 与`restore_download_queue`一样，为恢复的条目重新创建任务后才参与调度
+    for entry in queue.entries() {
+        queue.insert(entry).unwrap();
+    }
     let slots = Arc::new(Semaphore::new(1));
     let observed = Arc::new(Mutex::new(Vec::new()));
     let run = |task: QueuedDownload| {
@@ -90,6 +94,33 @@ async fn reorder_wakes_a_waiter_blocked_on_an_occupied_slot() {
     .unwrap();
     assert_eq!(*observed.lock(), vec![2, 1]);
 }
+
+#[tokio::test]
+async fn unrestored_entry_does_not_block_new_downloads() {
+    let fixture = Fixture::new();
+    let queue = DownloadQueue::open(fixture.path()).unwrap();
+    queue
+        .insert(fixture.task(1, DownloadTaskState::Pending))
+        .unwrap();
+    drop(queue);
+
+    // 重启后条目 1 尚未恢复（或恢复失败），新建的任务不能一直排在它后面
+    let queue = DownloadQueue::open(fixture.path()).unwrap();
+    let created = fixture.task(2, DownloadTaskState::Pending);
+    queue.insert(created.clone()).unwrap();
+    let permit = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        queue.acquire(2, &created.task_id, Arc::new(Semaphore::new(1))),
+    )
+    .await
+    .expect("新任务不应等待未恢复的条目")
+    .unwrap();
+    drop(permit);
+
+    let saved = DownloadQueue::open(fixture.path()).unwrap().entries();
+    assert_eq!(saved[0].chapter_id, 1);
+    assert_eq!(saved[0].restored_state(), Some(DownloadTaskState::Pending));
+}
 impl Fixture {
     fn new() -> Self {
         let root =
@@ -109,6 +140,7 @@ impl Fixture {
             format: DownloadFormat::Png,
             total_img_count: 12,
             position: 0,
+            attached: false,
             comic: Comic {
                 id: 10,
                 name: "Fixture comic".into(),
