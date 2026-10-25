@@ -10,10 +10,7 @@ const mode = defineModel<ChapterPaneMode>('chapterPaneMode', { required: true })
 const chapters = computed(() => store.pickedComic?.chapterInfos ?? [])
 function read(chapter: ChapterInfo) {
   if (store.pickedComic === undefined) return
-  store.readerChapterId = null
-  store.readerComic = null
-  store.onlineReaderComic = store.pickedComic
-  store.onlineReaderChapter = chapter
+  store.openOnlineReader(store.pickedComic, chapter)
 }
 </script>
 
@@ -29,7 +26,13 @@ function read(chapter: ChapterInfo) {
     <p class="text-sm text-gray-6 px-2 my-3">无需下载，选择章节开始阅读。</p>
     <n-empty v-if="chapters.length === 0" description="暂无可阅读的章节" class="my-6" />
     <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-2 p-2 overflow-auto content-start">
-      <n-button v-for="chapter in chapters" :key="chapter.chapterId" size="small" class="min-w-0 justify-start!" :title="chapter.chapterTitle" @click="read(chapter)">
+      <n-button
+        v-for="chapter in chapters"
+        :key="chapter.chapterId"
+        size="small"
+        class="min-w-0 justify-start!"
+        :title="chapter.chapterTitle"
+        @click="read(chapter)">
         <span class="truncate">{{ chapter.chapterTitle }}</span>
       </n-button>
     </div>

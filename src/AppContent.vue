@@ -15,6 +15,9 @@ import LogDialog from './dialogs/LogDialog.vue'
 import WeeklyPane from './panes/WeeklyPane.vue'
 import ReaderPane from './panes/ReaderPane.vue'
 import OnlineReaderPane from './panes/OnlineReaderPane.vue'
+import HistoryPane from './panes/HistoryPane.vue'
+import UpdatesPane from './panes/UpdatesPane.vue'
+import IntegrityPane from './panes/IntegrityPane.vue'
 
 const store = useStore()
 
@@ -42,21 +45,26 @@ watch(
 )
 
 onMounted(async () => {
+  store.initializeReadingHistory()
   // 屏蔽浏览器右键菜单
   document.oncontextmenu = (event) => {
     event.preventDefault()
   }
-  // 获取配置
-  store.config = await commands.getConfig()
-  // 如果username和password不为空，尝试登录
-  if (store.config.username !== '' && store.config.password !== '') {
-    const result = await commands.login(store.config.username, store.config.password)
-    if (result.status === 'error') {
-      console.error(result.error)
-      return
+  try {
+    // 获取配置
+    store.config = await commands.getConfig()
+    // 如果username和password不为空，尝试登录
+    if (store.config.username !== '' && store.config.password !== '') {
+      const result = await commands.login(store.config.username, store.config.password)
+      if (result.status === 'error') {
+        console.error(result.error)
+        return
+      }
+      store.userProfile = result.data
+      message.success('自动登录成功')
     }
-    store.userProfile = result.data
-    message.success('自动登录成功')
+  } finally {
+    store.startupReady = true
   }
 })
 </script>
@@ -78,6 +86,15 @@ onMounted(async () => {
       </n-tab-pane>
       <n-tab-pane class="h-full overflow-auto p-0!" name="chapter" tab="章节详情" display-directive="show">
         <ChapterPane />
+      </n-tab-pane>
+      <n-tab-pane class="h-full overflow-hidden p-0!" name="history" tab="阅读记录" display-directive="show">
+        <HistoryPane />
+      </n-tab-pane>
+      <n-tab-pane class="h-full overflow-hidden p-0!" name="updates" tab="更新追更" display-directive="show">
+        <UpdatesPane />
+      </n-tab-pane>
+      <n-tab-pane class="h-full overflow-hidden p-0!" name="integrity" tab="库存体检" display-directive="show">
+        <IntegrityPane />
       </n-tab-pane>
     </n-tabs>
     <div class="w-1/2 overflow-auto flex flex-col">

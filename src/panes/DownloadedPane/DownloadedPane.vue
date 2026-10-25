@@ -14,11 +14,17 @@ import {
   NInputGroup,
   NInputGroupLabel,
   NPagination,
+  NSelect,
+  NEmpty,
   useDialog,
 } from 'naive-ui'
 import { PartialSelectionOptions, SelectionArea, SelectionEvent } from '@viselect/vue'
 import { PhChecks, PhCheck, PhX, PhTrash } from '@phosphor-icons/vue'
 import UpdateDownloadedComicsButton from './components/UpdateDownloadedComicsButton.vue'
+import { filterInventory } from '../../inventory.ts'
+import type { InventoryStatus, InventorySort } from '../../inventory.ts'
+import { READING_STATUS_OPTIONS, useReadingLibrary } from '../../reader/library.ts'
+import type { ReadingStatus } from '../../reader/library.ts'
 
 const store = useStore()
 const dialog = useDialog()
@@ -34,20 +40,50 @@ const { dropdownX, dropdownY, dropdownShowing, dropdownOptions, showDropdown } =
 const selectionAreaRef = useTemplateRef('selectionAreaRef')
 
 const PAGE_SIZE = 20
+const query = ref('')
+const tag = ref<string | null>(null)
+const inventoryStatus = ref<InventoryStatus>('all')
+const sort = ref<InventorySort>('title')
+const readingStatus = ref<ReadingStatus | 'all'>('all')
+const readingLibrary = useReadingLibrary()
+const tagOptions = computed(() =>
+  [...new Set(store.downloadedComics.flatMap((comic) => comic.tags))]
+    .sort((left, right) => left.localeCompare(right, 'zh-CN'))
+    .map((value) => ({ label: value, value })),
+)
+const statusOptions = [
+  { label: '全部库存', value: 'all' },
+  { label: '全部章节已下载', value: 'complete' },
+  { label: '部分章节已下载', value: 'partial' },
+]
+const sortOptions = [
+  { label: '标题正序', value: 'title' },
+  { label: '标题倒序', value: 'title-desc' },
+  { label: '作者', value: 'author' },
+  { label: '章节数量', value: 'chapters' },
+]
+const filteredComics = computed(() =>
+  filterInventory(store.downloadedComics, {
+    query: query.value,
+    tag: tag.value,
+    status: inventoryStatus.value,
+    sort: sort.value,
+  }).filter((comic) => readingStatus.value === 'all' || readingLibrary.statusFor(comic.id) === readingStatus.value),
+)
 // 当前页码
 const currentPage = ref<number>(1)
 // 总页数
 const pageCount = computed<number>(() => {
-  if (store.downloadedComics.length === 0) {
+  if (filteredComics.value.length === 0) {
     return 1
   }
-  return Math.ceil(store.downloadedComics.length / PAGE_SIZE)
+  return Math.ceil(filteredComics.value.length / PAGE_SIZE)
 })
 // 当前页的漫画
 const currentPageComics = computed<Comic[]>(() => {
   const start = (currentPage.value - 1) * PAGE_SIZE
   const end = start + PAGE_SIZE
-  return store.downloadedComics.slice(start, end)
+  return filteredComics.value.slice(start, end)
 })
 // 确保当前页码不超过总页数
 watchEffect(() => {
@@ -56,7 +92,10 @@ watchEffect(() => {
   }
 })
 
-watch(currentPage, () => {
+watch([query, tag, inventoryStatus, sort, readingStatus], () => {
+  currentPage.value = 1
+})
+watch([currentPage, query, tag, inventoryStatus, sort, readingStatus], () => {
   selectedIds.value.clear()
   checkedIds.value.clear()
   selectionAreaRef.value?.selection?.clearSelection()
@@ -115,8 +154,12 @@ function updateSelectedIds({
     changed: { added, removed },
   },
 }: SelectionEvent) {
-  extractIds(added).forEach((id) => selectedIds.value.add(id))
-  extractIds(removed).forEach((id) => selectedIds.value.delete(id))
+  extractIds(added).forEach((id) => {
+    selectedIds.value.add(id)
+  })
+  extractIds(removed).forEach((id) => {
+    selectedIds.value.delete(id)
+  })
 }
 
 function unselectAll({ event, selection }: SelectionEvent) {
@@ -210,19 +253,19 @@ function clearDeletedComicState(comic: Comic) {
   }
 }
 
-function confirmDeleteCheckedComics() {
-  if (checkedIds.value.size === 0) {
+function confirmDeleteComics(ids: ReadonlySet<number>) {
+  if (ids.size === 0) {
     return
   }
 
-  const comicsToDelete = currentPageComics.value.filter((comic) => checkedIds.value.has(comic.id))
+  const comicsToDelete = currentPageComics.value.filter((comic) => ids.has(comic.id))
   if (comicsToDelete.length === 0) {
     return
   }
 
   dialog.warning({
     title: '删除本地库存',
-    content: `确定删除勾选的 ${comicsToDelete.length} 部漫画吗？这会删除本地下载目录。`,
+    content: `确定删除这 ${comicsToDelete.length} 部漫画吗？这会删除本地下载目录。\n${comicsToDelete.map((comic) => comic.name).join('、')}`,
     positiveText: '删除',
     negativeText: '取消',
     onPositiveClick: async () => {
@@ -233,9 +276,9 @@ function confirmDeleteCheckedComics() {
           continue
         }
         clearDeletedComicState(comic)
+        checkedIds.value.delete(comic.id)
       }
 
-      checkedIds.value.clear()
       selectedIds.value.clear()
       selectionAreaRef.value?.selection?.clearSelection()
       await reloadDownloadedComics()
@@ -258,7 +301,9 @@ function useDropdown() {
       ),
       props: {
         onClick: () => {
-          selectedIds.value.forEach((id) => checkedIds.value.add(id))
+          selectedIds.value.forEach((id) => {
+            checkedIds.value.add(id)
+          })
           dropdownShowing.value = false
         },
       },
@@ -273,7 +318,9 @@ function useDropdown() {
       ),
       props: {
         onClick: () => {
-          selectedIds.value.forEach((id) => checkedIds.value.delete(id))
+          selectedIds.value.forEach((id) => {
+            checkedIds.value.delete(id)
+          })
           dropdownShowing.value = false
         },
       },
@@ -288,7 +335,9 @@ function useDropdown() {
       ),
       props: {
         onClick: () => {
-          currentPageComics.value.forEach((comic) => selectedIds.value.add(comic.id))
+          currentPageComics.value.forEach((comic) => {
+            selectedIds.value.add(comic.id)
+          })
           dropdownShowing.value = false
         },
       },
@@ -303,9 +352,8 @@ function useDropdown() {
       ),
       props: {
         onClick: () => {
-          selectedIds.value.forEach((id) => checkedIds.value.add(id))
           dropdownShowing.value = false
-          confirmDeleteCheckedComics()
+          confirmDeleteComics(selectedIds.value)
         },
       },
     },
@@ -330,7 +378,7 @@ function useDropdown() {
 </script>
 
 <template>
-  <div v-if="store.config !== undefined" class="h-full flex flex-col">
+  <div v-if="store.config !== undefined" class="h-full min-h-0 flex flex-col">
     <div class="flex gap-1 box-border px-2 pt-2">
       <n-input-group>
         <n-input-group-label size="small">导出目录</n-input-group-label>
@@ -344,6 +392,48 @@ function useDropdown() {
         </n-button>
       </n-input-group>
       <update-downloaded-comics-button />
+      <n-button size="small" @click="store.currentTabName = 'integrity'">库存体检</n-button>
+    </div>
+    <div class="grid grid-cols-2 gap-2 p-2">
+      <label class="col-span-2 text-sm">
+        搜索库存
+        <n-input
+          v-model:value="query"
+          size="small"
+          clearable
+          placeholder="标题、作者、标签或漫画 ID"
+          :input-props="{ 'aria-label': '搜索库存' }" />
+      </label>
+      <label class="text-sm">
+        标签
+        <n-select
+          v-model:value="tag"
+          size="small"
+          clearable
+          filterable
+          :options="tagOptions"
+          placeholder="全部标签"
+          aria-label="库存标签" />
+      </label>
+      <label class="text-sm">
+        下载状态
+        <n-select v-model:value="inventoryStatus" size="small" :options="statusOptions" aria-label="库存下载状态" />
+      </label>
+      <label class="text-sm">
+        排序
+        <n-select v-model:value="sort" size="small" :options="sortOptions" aria-label="库存排序" />
+      </label>
+      <label class="text-sm">
+        阅读状态
+        <n-select
+          v-model:value="readingStatus"
+          size="small"
+          aria-label="库存阅读状态"
+          :options="[{ label: '全部阅读状态', value: 'all' }, ...READING_STATUS_OPTIONS]" />
+      </label>
+      <span class="text-sm self-end pb-1" role="status">
+        {{ filteredComics.length }} / {{ store.downloadedComics.length }} 部
+      </span>
     </div>
     <div class="flex gap-2 items-center px-2 select-none">
       <div class="animate-pulse text-sm text-red flex flex-col">
@@ -351,14 +441,14 @@ function useDropdown() {
         <div>右边的按钮作用于勾选项</div>
       </div>
     </div>
-    <div class="flex gap-2 items-center px-2 pb-2 select-none">
+    <div class="flex flex-wrap gap-2 items-center px-2 pb-2 select-none">
       <n-button
         class="ml-auto"
         type="error"
         ghost
         size="small"
         :disabled="checkedIds.size === 0"
-        @click="confirmDeleteCheckedComics">
+        @click="confirmDeleteComics(checkedIds)">
         删除库存
       </n-button>
       <n-button type="primary" size="small" @click="exportCbz">导出cbz</n-button>
@@ -367,8 +457,16 @@ function useDropdown() {
     </div>
     <SelectionArea ref="selectionAreaRef" :options="selectionOptions" @move="updateSelectedIds" @start="unselectAll" />
     <div
-      class="flex flex-col overflow-auto box-border px-2 downloaded-pane-selection-container mb-2"
+      class="flex-1 min-h-0 flex flex-col overflow-auto box-border px-2 downloaded-pane-selection-container mb-2"
       @contextmenu="showDropdown">
+      <n-empty
+        v-if="filteredComics.length === 0"
+        class="my-8"
+        :description="
+          store.downloadedComics.length === 0
+            ? '暂无本地库存，下载后会显示在这里'
+            : '没有匹配的漫画，请调整搜索或筛选条件'
+        " />
       <DownloadedComicCard
         v-for="comic in currentPageComics"
         :key="comic.id"

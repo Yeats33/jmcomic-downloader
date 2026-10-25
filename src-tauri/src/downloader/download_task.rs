@@ -11,12 +11,13 @@ use eyre::{eyre, OptionExt, WrapErr};
 use tauri::AppHandle;
 use tauri_specta::Event;
 use tokio::{
-    sync::{watch, Mutex, OwnedSemaphorePermit, SemaphorePermit},
+    sync::{watch, Mutex, OwnedSemaphorePermit},
     task::JoinSet,
     time::sleep,
 };
 use tracing::{instrument, Instrument};
 
+use super::queue::{DownloadQueue, QueueCheckpoint, QueuedDownload};
 use crate::{
     downloader::{
         download_img_task::{calculate_block_num, DownloadImgTask},
@@ -28,7 +29,7 @@ use crate::{
     events::DownloadEvent,
     extensions::{AppHandleExt, EyreReportToMessage},
     jm_client::IMAGE_DOMAIN,
-    types::{ChapterInfo, Comic},
+    types::{ChapterInfo, Comic, DownloadFormat},
 };
 
 pub struct DownloadTask {
@@ -43,6 +44,10 @@ pub struct DownloadTask {
     pub(super) image_writes: ImageWrites,
     pub(super) deletion_lock: Arc<Mutex<()>>,
     process_finished: watch::Receiver<()>,
+    pub(super) download_format: DownloadFormat,
+    task_id: String,
+    queue: Arc<DownloadQueue>,
+    state_change: parking_lot::Mutex<()>,
 }
 
 impl DownloadTask {
@@ -60,6 +65,30 @@ impl DownloadTask {
             .ensure_download_dir_fields(&app)
             .wrap_err("更新下载目录字段失败")?;
 
+        let (root, format) = {
+            let config = app.get_config();
+            let config = config.read();
+            (config.download_dir.clone(), config.download_format)
+        };
+        Self::from_queue(
+            app,
+            QueuedDownload {
+                task_id: uuid::Uuid::new_v4().to_string(),
+                comic,
+                chapter_id,
+                root,
+                format,
+                state: DownloadTaskState::Pending,
+                total_img_count: 0,
+                position: 0,
+            },
+        )
+    }
+
+    pub(super) fn from_queue(app: AppHandle, entry: QueuedDownload) -> eyre::Result<Arc<Self>> {
+        let comic = entry.comic.clone();
+        let chapter_id = entry.chapter_id;
+
         let chapter_info = comic
             .chapter_infos
             .iter()
@@ -67,10 +96,42 @@ impl DownloadTask {
             .cloned()
             .ok_or_eyre(format!("未找到章节ID为`{chapter_id}`的章节信息"))?;
 
-        let (state_sender, _) = watch::channel(DownloadTaskState::Pending);
+        let paths = DownloadPaths::new(&entry.root, &comic, &chapter_info)?;
+        let queue = Arc::clone(app.get_download_manager().queue()?);
+        let metadata_path = paths.chapter.join("章节元数据.json");
+        let already_complete = match std::fs::read(&metadata_path) {
+            Ok(bytes) => serde_json::from_slice::<ChapterInfo>(&bytes)
+                .is_ok_and(|saved| saved.chapter_id == chapter_id),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => return Err(error.into()),
+        };
+        let state = if already_complete {
+            DownloadTaskState::Completed
+        } else {
+            entry.state
+        };
+        let downloaded_dir = if already_complete {
+            &paths.chapter
+        } else {
+            &paths.temporary
+        };
+        let downloaded_count =
+            u32::try_from(read_downloaded_imgs_from_dir(downloaded_dir, true)?.len())?;
+        queue.insert(QueuedDownload {
+            comic: comic.clone(),
+            state,
+            ..entry.clone()
+        })?;
+        if already_complete {
+            queue.update(QueueCheckpoint {
+                task_id: &entry.task_id,
+                chapter_id,
+                state,
+                total_img_count: downloaded_count,
+            })?;
+        }
+        let (state_sender, _) = watch::channel(state);
         let (delete_sender, _) = watch::channel(());
-        let download_root = app.get_config().read().download_dir.clone();
-        let paths = DownloadPaths::new(&download_root, &comic, &chapter_info)?;
         let (finished_sender, process_finished) = watch::channel(());
 
         let task = Arc::new(Self {
@@ -79,12 +140,20 @@ impl DownloadTask {
             chapter_info: Arc::new(chapter_info),
             state_sender,
             delete_sender,
-            downloaded_img_count: Arc::new(AtomicU32::new(0)),
-            total_img_count: Arc::new(AtomicU32::new(0)),
+            downloaded_img_count: Arc::new(AtomicU32::new(downloaded_count)),
+            total_img_count: Arc::new(AtomicU32::new(if already_complete {
+                downloaded_count
+            } else {
+                entry.total_img_count
+            })),
             paths,
             image_writes: ImageWrites::new(),
             deletion_lock: Arc::new(Mutex::new(())),
             process_finished,
+            download_format: entry.format,
+            task_id: entry.task_id,
+            queue,
+            state_change: parking_lot::Mutex::new(()),
         });
 
         let process_task = task.clone();
@@ -209,9 +278,14 @@ impl DownloadTask {
             return;
         };
 
-        #[allow(clippy::cast_possible_truncation)]
-        self.total_img_count
-            .fetch_add(urls_with_block_num.len() as u32, Ordering::Relaxed);
+        let Ok(total) = u32::try_from(urls_with_block_num.len()) else {
+            self.set_state(DownloadTaskState::Failed);
+            self.emit_download_task_update_event();
+            return;
+        };
+        self.total_img_count.store(total, Ordering::Relaxed);
+        self.downloaded_img_count.store(0, Ordering::Relaxed);
+        self.set_state(DownloadTaskState::Downloading);
 
         let Some(temp_download_dir) = self.create_temp_download_dir() else {
             return;
@@ -256,6 +330,13 @@ impl DownloadTask {
             return;
         }
 
+        if let Err(error) = crate::integrity::write_manifest(
+            &self.paths.chapter,
+            total_img_count,
+            self.download_format,
+        ) {
+            tracing::warn!(%error, "页面清单保存失败，可通过联网检查补充总页数");
+        }
         if let Err(err) = self.chapter_info.save_chapter_metadata() {
             let err_title = "保存章节元数据失败";
             let message = err.to_message();
@@ -402,7 +483,7 @@ impl DownloadTask {
             }
         };
 
-        let download_format = self.app.get_config().read().download_format;
+        let download_format = self.download_format;
         let extension = download_format.extension();
         for path in entries.filter_map(Result::ok).map(|entry| entry.path()) {
             let should_keep = path
@@ -424,7 +505,7 @@ impl DownloadTask {
     }
 
     #[instrument(level = "error", skip_all)]
-    async fn acquire_chapter_permit<'a>(&'a self, permit: &mut Option<SemaphorePermit<'a>>) {
+    async fn acquire_chapter_permit(&self, permit: &mut Option<OwnedSemaphorePermit>) {
         tracing::debug!("章节开始排队");
 
         self.emit_download_task_update_event();
@@ -432,13 +513,13 @@ impl DownloadTask {
         *permit = match permit.take() {
             Some(permit) => Some(permit),
             None => match self
-                .app
-                .get_download_manager()
-                .inner()
-                .chapter_sem
-                .acquire()
+                .queue
+                .acquire(
+                    self.chapter_info.chapter_id,
+                    &self.task_id,
+                    Arc::clone(&self.app.get_download_manager().chapter_sem),
+                )
                 .await
-                .map_err(eyre::Report::from)
             {
                 Ok(permit) => Some(permit),
                 Err(err) => {
@@ -453,26 +534,19 @@ impl DownloadTask {
             },
         };
 
+        let _guard = self.state_change.lock();
         if *self.state_sender.borrow() != DownloadTaskState::Pending {
+            permit.take();
             return;
         }
-
-        if let Err(err) = self
-            .state_sender
-            .send(DownloadTaskState::Downloading)
-            .map_err(eyre::Report::from)
-        {
-            let err_title = "发送状态`Downloading`失败";
-            let message = err.to_message();
-            tracing::error!(err_title, message);
-            self.set_state(DownloadTaskState::Failed);
-        }
+        self.state_sender
+            .send_replace(DownloadTaskState::Downloading);
     }
 
     #[instrument(level = "error", skip_all)]
-    async fn handle_state_change<'a>(
-        &'a self,
-        permit: &mut Option<SemaphorePermit<'a>>,
+    async fn handle_state_change(
+        &self,
+        permit: &mut Option<OwnedSemaphorePermit>,
         state_receiver: &mut watch::Receiver<DownloadTaskState>,
     ) {
         self.emit_download_task_update_event();
@@ -492,7 +566,7 @@ impl DownloadTask {
     }
 
     #[instrument(level = "error", skip_all)]
-    async fn handle_delete_receiver_change<'a>(&'a self, permit: &mut Option<SemaphorePermit<'a>>) {
+    async fn handle_delete_receiver_change(&self, permit: &mut Option<OwnedSemaphorePermit>) {
         if permit.is_some() {
             sleep(Duration::from_millis(100)).await;
         }
@@ -526,7 +600,22 @@ impl DownloadTask {
         )
     )]
     pub fn set_state(&self, state: DownloadTaskState) {
+        if let Err(error) = self.change_state(state) {
+            tracing::error!(err_title = "保存下载队列失败", message = %error);
+            self.state_sender.send_replace(state);
+        }
+    }
+
+    pub(super) fn change_state(&self, state: DownloadTaskState) -> eyre::Result<()> {
+        let _guard = self.state_change.lock();
+        self.queue.update(QueueCheckpoint {
+            task_id: &self.task_id,
+            chapter_id: self.chapter_info.chapter_id,
+            state,
+            total_img_count: self.total_img_count.load(Ordering::Relaxed),
+        })?;
         self.state_sender.send_replace(state);
+        Ok(())
     }
 
     /// 获取当前任务中已下载的图片信息(供阅读模式使用)
@@ -582,7 +671,7 @@ impl DownloadTask {
         .emit(&self.app);
     }
 
-    fn emit_download_task_create_event(&self) {
+    pub(super) fn emit_download_task_create_event(&self) {
         let _ = DownloadEvent::TaskCreate {
             state: *self.state_sender.borrow(),
             comic: Box::new(self.comic.as_ref().clone()),
@@ -597,10 +686,7 @@ impl DownloadTask {
 /// 任务进入`Paused`/`Failed`/`Cancelled`状态时，需要释放持有中的章节下载permit
 ///
 /// 不释放的话，其他章节就再也拿不到permit(表现为所有章节都卡在`排队中`)
-fn release_permit_if_needed<'a>(
-    state: DownloadTaskState,
-    permit: &mut Option<SemaphorePermit<'a>>,
-) {
+fn release_permit_if_needed(state: DownloadTaskState, permit: &mut Option<OwnedSemaphorePermit>) {
     let should_release = match state {
         DownloadTaskState::Paused | DownloadTaskState::Failed | DownloadTaskState::Cancelled => {
             true
@@ -619,20 +705,23 @@ fn release_permit_if_needed<'a>(
 
 #[cfg(test)]
 mod tests {
-    use tokio::sync::Semaphore;
+    use std::sync::Arc;
+    use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
     use super::{release_permit_if_needed, DownloadTaskState};
 
     /// 模拟`process()`中的章节permit: 任务下载时持有permit
-    fn acquire_permit<'a>(semaphore: &'a Semaphore) -> tokio::sync::SemaphorePermit<'a> {
-        semaphore.try_acquire().expect("应该能拿到permit")
+    fn acquire_permit(semaphore: &Arc<Semaphore>) -> OwnedSemaphorePermit {
+        Arc::clone(semaphore)
+            .try_acquire_owned()
+            .expect("应该能拿到permit")
     }
 
     #[tokio::test]
     async fn cancelled_task_releases_the_chapter_permit() {
         // 回归测试: 取消下载的任务必须释放章节permit，
         // 否则被取消的任务会永久占用一个下载槽位，其他章节全部卡在`排队中`
-        let semaphore = Semaphore::new(1);
+        let semaphore = Arc::new(Semaphore::new(1));
         let mut permit = Some(acquire_permit(&semaphore));
 
         release_permit_if_needed(DownloadTaskState::Cancelled, &mut permit);
@@ -646,7 +735,7 @@ mod tests {
 
     #[tokio::test]
     async fn failed_task_releases_the_chapter_permit() {
-        let semaphore = Semaphore::new(1);
+        let semaphore = Arc::new(Semaphore::new(1));
         let mut permit = Some(acquire_permit(&semaphore));
 
         release_permit_if_needed(DownloadTaskState::Failed, &mut permit);
@@ -657,7 +746,7 @@ mod tests {
 
     #[tokio::test]
     async fn paused_task_releases_the_chapter_permit() {
-        let semaphore = Semaphore::new(1);
+        let semaphore = Arc::new(Semaphore::new(1));
         let mut permit = Some(acquire_permit(&semaphore));
 
         release_permit_if_needed(DownloadTaskState::Paused, &mut permit);
@@ -668,7 +757,7 @@ mod tests {
 
     #[tokio::test]
     async fn downloading_task_keeps_the_chapter_permit() {
-        let semaphore = Semaphore::new(1);
+        let semaphore = Arc::new(Semaphore::new(1));
         let mut permit = Some(acquire_permit(&semaphore));
 
         release_permit_if_needed(DownloadTaskState::Downloading, &mut permit);
