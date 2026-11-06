@@ -1,0 +1,5 @@
+- insert:
+    - id: jmcomic
+      name: '@local/dsh-jmcomic'
+      config:
+        apiDomain: www.cdnbea.net

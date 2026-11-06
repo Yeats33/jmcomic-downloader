@@ -14,6 +14,10 @@
 
 **如果本项目对你有帮助，欢迎点个 Star⭐ 支持！你的支持是我持续更新维护的动力🙏**
 
+# DeepSeek Harness 插件
+
+本仓库另提供实验性的 DSH 混合插件，包含搜索界面和 AI 工具。功能范围、安装方式与安全限制见 [插件说明](dsh-plugin/README.md)；原有 Tauri 应用仍可独立使用。
+
 # 🖥️ 图形界面
 
 ![image](https://github.com/user-attachments/assets/2ec6e5f9-a211-4325-8671-0a15f4bcba6c)
