@@ -18,7 +18,7 @@
 
 本项目还提供独立的 **DSH 混合插件**：在 DSH 侧栏搜索漫画、查看章节和在线阅读，也可使用 AI 工具查询或下载单个章节。插件代码在 [`dsh-plugin` 分支](https://github.com/Yeats33/jmcomic-downloader/tree/dsh-plugin/dsh-plugin)，不会替换原有 Tauri 桌面应用。
 
-- [下载 DSH 插件 v0.1.0](https://github.com/Yeats33/jmcomic-downloader/releases/tag/dsh-plugin-v0.1.0)，选择附件 `local-dsh-jmcomic-0.1.0.tgz`，在 DSH 插件管理器中安装并启用。
+- [下载 DSH 插件 v0.1.1](https://github.com/Yeats33/jmcomic-downloader/releases/tag/dsh-plugin-v0.1.1)，选择附件 `local-dsh-jmcomic-0.1.1.tgz`，在 DSH 插件管理器中安装并启用。搜索结果支持封面和分页，在线阅读支持左右方向键翻页。
 - [安装配置和功能限制](https://github.com/Yeats33/jmcomic-downloader/blob/dsh-plugin/dsh-plugin/README.md)。当前版本针对 DSH **0.2.2-rc.1**；安装需要联网获取依赖。下载功能默认关闭，须先配置专用下载目录；AI 发起下载还需用户逐次审批。
 - 插件目前不包含登录、收藏、本地阅读、导出及下载队列恢复，也不迁移桌面应用的数据。
 
