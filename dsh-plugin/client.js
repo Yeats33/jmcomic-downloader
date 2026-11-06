@@ -114,62 +114,183 @@ window.__ModuleLoader__.load({
       for (let i = 0; i < decoded.length; i++) bytes[i] = decoded.charCodeAt(i);
       return new Blob([bytes], { type: result.mime });
     }
+    const READER_PREFETCH_PAGES = 10;
+    const READER_CACHE_BYTES = 64 * 1024 * 1024;
+    function createReaderSession(api, chapterId, notify) {
+      const cache = new Map();
+      const failures = new Map();
+      let bytes = 0;
+      let currentPage = 1;
+      let total = null;
+      let foreground = null;
+      let background = null;
+      let generation = 0;
+      let closed = false;
+      let limited = false;
+      function remove(page) {
+        const item = cache.get(page);
+        if (!item) return;
+        URL.revokeObjectURL(item.url);
+        bytes -= item.size;
+        cache.delete(page);
+      }
+      function trim() {
+        const last = Math.min(total === null ? Infinity : total, currentPage + READER_PREFETCH_PAGES);
+        for (const page of cache.keys()) if (page < currentPage || page > last) remove(page);
+        for (const page of failures.keys()) if (page < currentPage || page > last) failures.delete(page);
+      }
+      function reportBuffer() {
+        if (closed) return;
+        const target = total === null ? 0 : Math.min(READER_PREFETCH_PAGES, Math.max(0, total - currentPage));
+        let cached = 0;
+        let failed = 0;
+        for (let page = currentPage + 1; page <= currentPage + target; page++) {
+          if (cache.has(page)) cached++;
+          if (failures.has(page)) failed++;
+        }
+        notify.buffer({ cached, target, failed, limited, loading: !!background, known: total !== null });
+      }
+      function stopRequests() {
+        generation++;
+        if (foreground) foreground.abort();
+        if (background) background.abort();
+        foreground = null;
+        background = null;
+      }
+      function prefetch(version) {
+        if (closed || version !== generation || total === null || foreground || background || limited) return;
+        const end = Math.min(total, currentPage + READER_PREFETCH_PAGES);
+        let page = currentPage + 1;
+        while (page <= end && (cache.has(page) || failures.has(page))) page++;
+        if (page > end) { reportBuffer(); return; }
+        const controller = new AbortController();
+        background = controller;
+        reportBuffer();
+        Promise.resolve().then(() => {
+          if (closed || generation !== version || controller.signal.aborted) return null;
+          return api.readPage(chapterId, page, controller.signal);
+        }).then(result => {
+          if (closed || generation !== version || controller.signal.aborted) return;
+          const image = pageBlob(result, chapterId, page);
+          if (image.total !== total) throw new Error('章节页数发生变化，请重试。');
+          if (bytes + image.blob.size > READER_CACHE_BYTES) {
+            limited = true;
+          } else {
+            const url = URL.createObjectURL(image.blob);
+            cache.set(page, { url, size: image.blob.size });
+            bytes += image.blob.size;
+          }
+        }).catch(error => {
+          if (!closed && generation === version && !controller.signal.aborted) failures.set(page, text(error && error.message) || '未知错误');
+        }).finally(() => {
+          if (closed || generation !== version || background !== controller) return;
+          background = null;
+          reportBuffer();
+          if (!limited) prefetch(version);
+        });
+      }
+      function go(page) {
+        if (closed) return;
+        stopRequests();
+        currentPage = page;
+        limited = false;
+        trim();
+        // A previous speculative failure must not prevent a fresh foreground attempt.
+        failures.delete(page);
+        reportBuffer();
+        const item = cache.get(page);
+        if (item) {
+          notify.state({ status: 'done', url: item.url, page });
+          prefetch(generation);
+          return;
+        }
+        notify.state({ status: 'loading' });
+        const version = generation;
+        const controller = new AbortController();
+        foreground = controller;
+        Promise.resolve().then(() => {
+          if (closed || generation !== version || controller.signal.aborted) return null;
+          return api.readPage(chapterId, page, controller.signal);
+        }).then(result => {
+          if (closed || generation !== version || controller.signal.aborted) return;
+          const image = pageBlob(result, chapterId, page);
+          total = image.total;
+          notify.total(total);
+          trim();
+          // Prefer the current page over speculative pages when space is tight.
+          const future = [...cache.keys()].sort((a, b) => b - a);
+          while (future.length && bytes + image.blob.size > READER_CACHE_BYTES) remove(future.shift());
+          const url = URL.createObjectURL(image.blob);
+          cache.set(page, { url, size: image.blob.size });
+          bytes += image.blob.size;
+          foreground = null;
+          notify.state({ status: 'done', url, page });
+          reportBuffer();
+          prefetch(version);
+        }).catch(error => {
+          if (closed || generation !== version || controller.signal.aborted) return;
+          foreground = null;
+          failures.set(page, text(error && error.message) || '未知错误');
+          notify.state({ status: 'error', error: failures.get(page) });
+          reportBuffer();
+        });
+      }
+      function failImage(page, url) {
+        if (closed || page !== currentPage || !cache.has(page) || cache.get(page).url !== url) return;
+        stopRequests();
+        remove(page);
+        failures.set(page, '图片无法显示，请重试。');
+        notify.state({ status: 'error', error: failures.get(page) });
+        reportBuffer();
+      }
+      function destroy() {
+        if (closed) return;
+        closed = true;
+        stopRequests();
+        for (const page of cache.keys()) remove(page);
+        failures.clear();
+      }
+      return { go, failImage, destroy };
+    }
     function Reader({ api, chapterId, chapterName, previousChapter, nextChapter, onChapter, onBack }) {
       const [page, setPage] = React.useState(1);
       const [input, setInput] = React.useState('1');
       const [total, setTotal] = React.useState(null);
       const [zoom, setZoom] = React.useState(100);
-      const [attempt, setAttempt] = React.useState(0);
       const [state, setState] = React.useState({ status: 'loading' });
+      const [buffer, setBuffer] = React.useState({ known: false });
       const pageRef = React.useRef(1);
       const totalRef = React.useRef(null);
       const readerRef = React.useRef(null);
-      const active = React.useRef(null);
+      const sessionRef = React.useRef(null);
       function cancel() {
-        const current = active.current;
-        active.current = null;
-        if (!current) return;
-        current.controller.abort();
-        if (current.url) {
-          URL.revokeObjectURL(current.url);
-          current.url = null;
-        }
+        const current = sessionRef.current;
+        sessionRef.current = null;
+        if (current) current.destroy();
       }
       React.useEffect(() => {
-        const current = { controller: new AbortController(), url: null };
-        active.current = current;
-        setState({ status: 'loading' });
-        Promise.resolve().then(() => api.readPage(chapterId, page, current.controller.signal)).then(result => {
-          if (active.current !== current || current.controller.signal.aborted) return;
-          const image = pageBlob(result, chapterId, page);
-          if (active.current !== current || current.controller.signal.aborted) return;
-          current.url = URL.createObjectURL(image.blob);
-          totalRef.current = image.total;
-          setTotal(image.total);
-          setState({ status: 'done', url: current.url, page });
-        }).catch(error => {
-          if (active.current === current && !current.controller.signal.aborted) {
-            setState({ status: 'error', error: text(error && error.message) || '未知错误' });
-          }
+        const session = createReaderSession(api, chapterId, {
+          state: setState,
+          buffer: setBuffer,
+          total: value => { totalRef.current = value; setTotal(value); },
         });
+        sessionRef.current = session;
+        session.go(pageRef.current);
         return () => {
-          current.controller.abort();
-          if (current.url) URL.revokeObjectURL(current.url);
-          if (active.current === current) active.current = null;
+          session.destroy();
+          if (sessionRef.current === session) sessionRef.current = null;
         };
-      }, [api, chapterId, page, attempt]);
+      }, [api, chapterId]);
       function navigate(next) {
         if (!Number.isSafeInteger(next) || next < 1 || (totalRef.current !== null && next > totalRef.current) || next === pageRef.current) return;
         pageRef.current = next;
-        cancel();
-        setState({ status: 'loading' });
         setInput(String(next));
         setPage(next);
+        if (sessionRef.current) sessionRef.current.go(next);
+        else setState({ status: 'loading' });
       }
       function retry() {
-        cancel();
-        setState({ status: 'loading' });
-        setAttempt(value => value + 1);
+        if (sessionRef.current) sessionRef.current.go(pageRef.current);
       }
       function submitPage(event) {
         event.preventDefault();
@@ -219,13 +340,15 @@ window.__ModuleLoader__.load({
           h('span', null, zoom + '%'),
           h('button', { type: 'button', className: 'jm-button', disabled: zoom >= 200, onClick: () => setZoom(value => Math.min(200, value + 25)), 'aria-label': '放大图片' }, '+'),
           h('span', { className: 'jm-muted' }, '可使用左右方向键翻页。')),
+        h('p', { className: 'jm-muted', role: 'status' }, buffer.known ?
+          '后续页面缓冲：' + buffer.cached + ' / ' + buffer.target + ' 页' +
+            (buffer.loading ? '，正在缓冲' : '') + (buffer.limited ? '，已达内存上限' : '') +
+            (buffer.failed ? '，' + buffer.failed + ' 页缓冲失败，进入时自动重试' : '') : '缓冲：等待当前页加载。'),
         state.status === 'loading' ? h('p', { className: 'jm-box jm-muted', role: 'status' }, '正在加载图片…') : null,
         state.status === 'error' ? h('div', { className: 'jm-box' }, h('p', { className: 'jm-error', role: 'alert' }, '加载失败：', state.error), h('button', { type: 'button', className: 'jm-button', onClick: retry }, '重试')) : null,
         state.status === 'done' && state.page === page ? h('div', { className: 'jm-reader-image' },
           h('img', { src: state.url, alt: (chapterName || '章节') + '，第 ' + page + ' 页', style: { width: zoom + '%' }, onError: () => {
-            if (!active.current || active.current.url !== state.url) return;
-            cancel();
-            setState({ status: 'error', error: '图片无法显示，请重试。' });
+            if (sessionRef.current) sessionRef.current.failImage(page, state.url);
           } })) : null);
     }
     const SEARCH_SERVER_PAGE_SIZE = 80;

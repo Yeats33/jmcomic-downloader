@@ -1,6 +1,8 @@
 import { calculateBlockNum, restoreRows } from '../download/index.mjs';
 
 const CDN = 'https://cdn-msp2.jmapiproxy2.cc';
+const METADATA_TTL_MS = 2 * 60 * 1000;
+const METADATA_CACHE_SIZE = 2;
 const HARD_LIMITS = Object.freeze({ maxBytes: 16 * 1024 * 1024, maxOutputBytes: 16 * 1024 * 1024, maxPixels: 20_000_000, maxPages: 100, maxImages: 500, timeoutMs: 30_000 });
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
 
@@ -124,7 +126,22 @@ export function createOnlineReader({ client, fetch: fetchImpl = globalThis.fetch
     limits[key] = value;
   }
   let busy = false, disposed = false;
-  const queue = [], controllers = new Set();
+  const queue = [], controllers = new Set(), metadataCache = new Map();
+  function cachedMetadata(id) {
+    const entry = metadataCache.get(id);
+    if (!entry) return null;
+    if (Date.now() >= entry.expiresAt) { metadataCache.delete(id); return null; }
+    return entry;
+  }
+  // Called only after a page is successfully processed. Do not extend the TTL
+  // of previously fetched chapter data, even when adding a new scramble ID.
+  function commitMetadata(id, images, scramble, prior) {
+    const now = Date.now();
+    if (prior && now >= prior.expiresAt) { metadataCache.delete(id); return; }
+    metadataCache.delete(id);
+    metadataCache.set(id, { images, scramble, expiresAt: prior?.expiresAt ?? now + METADATA_TTL_MS });
+    while (metadataCache.size > METADATA_CACHE_SIZE) metadataCache.delete(metadataCache.keys().next().value);
+  }
   function release() {
     const next = queue.shift();
     if (next) { next.signal.removeEventListener('abort', next.abort); next.resolve(); }
@@ -149,6 +166,7 @@ export function createOnlineReader({ client, fetch: fetchImpl = globalThis.fetch
     dispose() {
       if (disposed) return;
       disposed = true;
+      metadataCache.clear();
       for (const controller of controllers) controller.abort(failure('DISPOSED', 'Online reader disposed'));
     },
     async readPage(args = {}) {
@@ -170,20 +188,38 @@ export function createOnlineReader({ client, fetch: fetchImpl = globalThis.fetch
         await acquire(controller.signal);
         acquired = true;
         check(controller.signal);
-        // Sequential metadata requests avoid launching unbounded work if one fails.
-        const chapter = await abortable(Promise.resolve().then(() => client.getChapter(id, { signal: controller.signal })), controller.signal);
-        check(controller.signal);
-        let metadataId;
-        try { metadataId = decimal(chapter?.id, 'chapter.id'); } catch (cause) { throw failure('INVALID_METADATA', 'Invalid chapter ID', { cause }); }
-        if (metadataId !== id || !Array.isArray(chapter.images) || chapter.images.length < 1 || chapter.images.length > limits.maxImages) throw failure('INVALID_METADATA', 'Invalid chapter metadata');
-        if (page > chapter.images.length) throw failure('PAGE_OUT_OF_RANGE', 'Page exceeds chapter length');
-        const name = filename(chapter.images[page - 1]);
+        const prior = cachedMetadata(id);
+        let images;
+        if (prior) images = prior.images;
+        else {
+          const chapter = await abortable(Promise.resolve().then(() => client.getChapter(id, { signal: controller.signal })), controller.signal);
+          check(controller.signal);
+          let metadataId;
+          try { metadataId = decimal(chapter?.id, 'chapter.id'); } catch (cause) { throw failure('INVALID_METADATA', 'Invalid chapter ID', { cause }); }
+          if (metadataId !== id || !Array.isArray(chapter.images) || chapter.images.length < 1 || chapter.images.length > limits.maxImages) throw failure('INVALID_METADATA', 'Invalid chapter metadata');
+          // Keep bounded strings only; validate the requested basename separately,
+          // so a malformed *other* page does not make this page unreadable.
+          images = Array.from(chapter.images);
+          if (images.some(name => typeof name !== 'string' || name.length > 200)) throw failure('INVALID_METADATA', 'Invalid chapter image list');
+        }
+        if (page > images.length) throw failure('PAGE_OUT_OF_RANGE', `页码超出章节范围；当前共 ${images.length} 页，请跳转到有效页。`);
+        const name = filename(images[page - 1]);
+        let scramble = prior?.scramble;
         const url = `${CDN}/media/photos/${id}/${encodeURIComponent(name)}`;
-        let bytes = await imageBytes(fetchImpl, url, controller.signal, limits.maxBytes);
-        // The upstream CDN occasionally caches an empty file; retry once, within
-        // the same deadline, with only a server-generated cache-busting query.
-        if (!bytes.length) bytes = await imageBytes(fetchImpl, `${url}?ts=${Math.floor(Date.now() / 1000)}`, controller.signal, limits.maxBytes);
-        if (!bytes.length) throw failure('INVALID_RESPONSE', 'Empty image response');
+        let bytes;
+        try {
+          bytes = await imageBytes(fetchImpl, url, controller.signal, limits.maxBytes);
+          // The upstream CDN occasionally caches an empty file; retry once, within
+          // the same deadline, with only a server-generated cache-busting query.
+          if (!bytes.length) bytes = await imageBytes(fetchImpl, `${url}?ts=${Math.floor(Date.now() / 1000)}`, controller.signal, limits.maxBytes);
+          if (!bytes.length) throw failure('INVALID_RESPONSE', 'Empty image response');
+        } catch (error) {
+          // A cached basename can become stale when the upstream chapter changes.
+          // Invalidate only for an actual cached-URL 404; the next request refreshes
+          // metadata, and this failed request never populates the cache.
+          if (prior && error instanceof OnlineReaderError && error.code === 'HTTP_ERROR' && error.status === 404) metadataCache.delete(id);
+          throw error;
+        }
         const decoded = await settleCodec(() => codec.decode(bytes, limits), controller.signal);
         const { width, height, channels, pages, format, data } = decoded ?? {};
         if (!Number.isSafeInteger(width) || width < 1 || !Number.isSafeInteger(height) || height < 1 || !Number.isSafeInteger(pages) || pages < 1 || pages > limits.maxPages || height % pages !== 0 || width * height > limits.maxPixels || !Number.isSafeInteger(channels) || channels < 1 || channels > 4 || !Buffer.isBuffer(data) || data.length !== width * height * channels || !['gif', 'webp', 'jpeg', 'png'].includes(format)) throw failure('IMAGE_ERROR', 'Invalid image dimensions, frames, data or format');
@@ -193,8 +229,10 @@ export function createOnlineReader({ client, fetch: fetchImpl = globalThis.fetch
         if (format === 'gif' && bytes[bytes.length - 1] !== 0x3b) throw failure('IMAGE_ERROR', 'GIF trailer is missing');
         if (format !== 'gif') {
           if (pages !== 1) throw failure('IMAGE_ERROR', 'Animated non-GIF images are unsupported');
-          const scramble = await abortable(Promise.resolve().then(() => client.getScrambleId(id, { signal: controller.signal })), controller.signal);
-          try { decimal(scramble, 'scrambleId', true); } catch (cause) { throw failure('INVALID_METADATA', 'Invalid scramble ID', { cause }); }
+          if (scramble === undefined) {
+            const value = await abortable(Promise.resolve().then(() => client.getScrambleId(id, { signal: controller.signal })), controller.signal);
+            try { scramble = decimal(value, 'scrambleId', true); } catch (cause) { throw failure('INVALID_METADATA', 'Invalid scramble ID', { cause }); }
+          }
           let restored;
           try { restored = restoreRows(data, width, height, channels, calculateBlockNum(scramble, id, name.slice(0, name.lastIndexOf('.')))); }
           catch (cause) { throw failure('IMAGE_ERROR', 'Image restoration failed', { cause }); }
@@ -203,7 +241,10 @@ export function createOnlineReader({ client, fetch: fetchImpl = globalThis.fetch
         }
         if (!Buffer.isBuffer(output) || !output.length || output.length > limits.maxOutputBytes) throw failure('OUTPUT_TOO_LARGE', 'Invalid or oversized output image');
         check(controller.signal);
-        return { chapterId: id, page, total: chapter.images.length, mime, data: output.toString('base64') };
+        const result = { chapterId: id, page, total: images.length, mime, data: output.toString('base64') };
+        check(controller.signal);
+        commitMetadata(id, images, scramble, prior);
+        return result;
       } finally {
         clearTimeout(timer);
         signal?.removeEventListener('abort', onAbort);
