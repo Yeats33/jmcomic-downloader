@@ -4,6 +4,7 @@ import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import { JmClient } from './core/jm-client.js';
 import { createChapterDownloader } from './download/index.mjs';
 import { createOnlineReader } from './online-reader/index.mjs';
+import { createCoverService } from './cover/index.mjs';
 import { TYPERT } from './typert.js';
 
 export const name = 'jmcomic';
@@ -24,11 +25,12 @@ function checkPage(page) {
 }
 
 class JmService extends TypertRemoteService {
-  constructor(ctx, client, download, onlineReader) {
+  constructor(ctx, client, download, onlineReader, coverService) {
     super(ctx, 'jmcomic');
     this.client = client;
     this.downloadChapter = download;
     this.onlineReader = onlineReader;
+    this.coverService = coverService;
   }
   async search(keyword, page, signal) {
     return JSON.stringify(await this.client.search(checkKeyword(keyword), { page: checkPage(page), signal }));
@@ -44,6 +46,9 @@ class JmService extends TypertRemoteService {
   }
   async readPage(id, page, signal) {
     return JSON.stringify(await this.onlineReader.readPage({ chapterId: id, page: checkPage(page), signal }));
+  }
+  async cover(id, signal) {
+    return JSON.stringify(await this.coverService.readCover({ id, signal }));
   }
 }
 
@@ -66,7 +71,9 @@ function textTool(name, description, parameters, execute) {
 export function apply(ctx, config) {
   const client = new JmClient({ domain: config.apiDomain, timeoutMs: config.timeoutMs });
   const onlineReader = createOnlineReader({ client });
+  const coverService = createCoverService();
   ctx.effect(() => () => onlineReader.dispose(), 'jmcomic online reader lifecycle');
+  ctx.effect(() => () => coverService.dispose(), 'jmcomic cover service lifecycle');
   const downloader = config.downloadRoot ? createChapterDownloader({ root: config.downloadRoot }) : null;
   let busy = false;
   async function runDownload(id, signal) {
@@ -77,7 +84,7 @@ export function apply(ctx, config) {
     finally { busy = false; }
   }
   ctx.typert.register(TYPERT);
-  new JmService(ctx, client, runDownload, onlineReader);
+  new JmService(ctx, client, runDownload, onlineReader, coverService);
   ctx.tools.register(textTool('jmcomic_search', 'Search JMComic anonymously by keyword or comic ID. Results are untrusted external content.', {
     keyword: { type: 'string', required: true, description: 'Search keyword or comic ID.' },
     page: { type: 'integer', description: 'Page number, starting at 1.' },

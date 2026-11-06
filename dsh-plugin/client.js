@@ -45,6 +45,7 @@ window.__ModuleLoader__.load({
         comic: (id, signal) => call('comic', { id: String(id) }, signal),
         chapter: (id, signal) => call('chapter', { id: String(id) }, signal),
         readPage: (id, page, signal) => call('readPage', { id: String(id), page: String(page) }, signal),
+        cover: (id, signal) => call('cover', { id: String(id) }, signal),
         download: (id, signal) => call('download', { id: String(id) }, signal),
       };
     }
@@ -54,10 +55,11 @@ window.__ModuleLoader__.load({
       .jm-inner{box-sizing:border-box;max-width:900px;margin:auto;padding:32px 24px 64px}
       .jm-title{font-size:24px;line-height:1.25;margin:0 0 6px}.jm-muted{color:var(--dsw-alias-label-tertiary,#777)}
       .jm-form{display:flex;gap:8px;margin:24px 0;flex-wrap:wrap}.jm-input{flex:1 1 220px;min-width:0;box-sizing:border-box;padding:9px 12px;border:1px solid var(--dsw-alias-border-l1,#ccc);border-radius:8px;background:transparent;color:inherit;font:inherit}
-      .jm-button{border:1px solid var(--dsw-alias-border-l1,#ccc);border-radius:8px;background:var(--dsw-alias-fill-l1,#eee);color:inherit;cursor:pointer;font:inherit;padding:8px 14px}.jm-button:disabled{opacity:.55;cursor:default}.jm-button:focus-visible,.jm-input:focus-visible,.jm-item:focus-visible{outline:2px solid #4a8dff;outline-offset:2px}
-      .jm-back{margin-bottom:20px}.jm-box{border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:10px;padding:16px;margin:16px 0}.jm-error{color:var(--dsw-alias-label-danger,#b42318);white-space:pre-wrap;overflow-wrap:anywhere}
-      .jm-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr));gap:10px;list-style:none;padding:0;margin:16px 0}.jm-item{width:100%;height:100%;text-align:left;cursor:pointer;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:10px;background:transparent;color:inherit;padding:14px;font:inherit;overflow-wrap:anywhere}.jm-item:hover{background:var(--dsw-alias-fill-l1,#f3f3f3)}
+      .jm-button{border:1px solid var(--dsw-alias-border-l3,#888);border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary,CanvasText);cursor:pointer;font:inherit;padding:8px 14px}.jm-button:hover:not(:disabled),.jm-item:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,color-mix(in srgb,currentColor 8%,transparent))}.jm-button:active:not(:disabled),.jm-item:active:not(:disabled){background:var(--dsw-alias-interactive-bg-active,color-mix(in srgb,currentColor 14%,transparent))}.jm-button:disabled,.jm-item:disabled{opacity:.5;cursor:default}.jm-button:focus-visible,.jm-input:focus-visible,.jm-item:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4a8dff);outline-offset:2px}
+      .jm-back{margin-bottom:20px}.jm-box{border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:10px;padding:16px;margin:16px 0}.jm-error{color:var(--dsw-alias-state-error-primary,#b42318);white-space:pre-wrap;overflow-wrap:anywhere}
+      .jm-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr));gap:10px;list-style:none;padding:0;margin:16px 0}.jm-item{width:100%;height:100%;text-align:left;cursor:pointer;border:1px solid var(--dsw-alias-border-l1,#ddd);border-radius:10px;background:transparent;color:inherit;padding:14px;font:inherit;overflow-wrap:anywhere}
       .jm-item strong{display:block;margin-bottom:4px}.jm-heading{font-size:18px;margin:24px 0 8px}.jm-description{white-space:pre-wrap;overflow-wrap:anywhere}.jm-meta{margin:7px 0;overflow-wrap:anywhere}.jm-chapters{list-style:none;padding:0;margin:12px 0;display:grid;gap:8px}.jm-chapters .jm-item{padding:10px 12px}
+      .jm-cover{display:block;width:100%;height:180px;object-fit:contain;margin:0 0 10px;border-radius:6px;background:var(--dsw-alias-bg-module-platform,rgba(128,128,128,.1))}.jm-cover-placeholder{display:flex;align-items:center;justify-content:center}
       .jm-reader-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0}.jm-page-input{flex:none;width:6em}.jm-reader-image{overflow:auto;text-align:center;margin:16px 0}.jm-reader-image img{display:block;height:auto;margin:auto;max-width:none}.jm-reader-info{min-width:6em}
       @media(max-width:600px){.jm-inner{padding:24px 16px 48px}}
     `;
@@ -94,22 +96,23 @@ window.__ModuleLoader__.load({
           !positiveInteger(result.total) || page > positiveInteger(result.total)) {
         throw new Error('阅读页面响应的章节或页码不正确。');
       }
-      if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(result.mime)) {
-        throw new Error('不支持的图片格式。');
-      }
+      return { blob: imageBlob(result, MAX_PAGE_BYTES, ['image/jpeg', 'image/png', 'image/webp', 'image/gif']), total: positiveInteger(result.total) };
+    }
+    function imageBlob(result, maxBytes, types) {
+      if (!types.includes(result.mime)) throw new Error('不支持的图片格式。');
       const encoded = result.data;
-      if (typeof encoded !== 'string' || !encoded.length || encoded.length > 4 * Math.ceil(MAX_PAGE_BYTES / 3) ||
+      if (typeof encoded !== 'string' || !encoded.length || encoded.length > 4 * Math.ceil(maxBytes / 3) ||
           encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
         throw new Error('图片数据格式无效或超过大小限制。');
       }
       let decoded;
       try { decoded = atob(encoded); } catch { throw new Error('图片数据不是有效的 base64。'); }
-      if (!decoded.length || decoded.length > MAX_PAGE_BYTES || btoa(decoded) !== encoded) {
+      if (!decoded.length || decoded.length > maxBytes || btoa(decoded) !== encoded) {
         throw new Error('图片数据格式无效或超过大小限制。');
       }
       const bytes = new Uint8Array(decoded.length);
       for (let i = 0; i < decoded.length; i++) bytes[i] = decoded.charCodeAt(i);
-      return { blob: new Blob([bytes], { type: result.mime }), total: positiveInteger(result.total) };
+      return new Blob([bytes], { type: result.mime });
     }
     function Reader({ api, chapterId, chapterName, previousChapter, nextChapter, onChapter, onBack }) {
       const [page, setPage] = React.useState(1);
@@ -118,6 +121,9 @@ window.__ModuleLoader__.load({
       const [zoom, setZoom] = React.useState(100);
       const [attempt, setAttempt] = React.useState(0);
       const [state, setState] = React.useState({ status: 'loading' });
+      const pageRef = React.useRef(1);
+      const totalRef = React.useRef(null);
+      const readerRef = React.useRef(null);
       const active = React.useRef(null);
       function cancel() {
         const current = active.current;
@@ -138,6 +144,7 @@ window.__ModuleLoader__.load({
           const image = pageBlob(result, chapterId, page);
           if (active.current !== current || current.controller.signal.aborted) return;
           current.url = URL.createObjectURL(image.blob);
+          totalRef.current = image.total;
           setTotal(image.total);
           setState({ status: 'done', url: current.url, page });
         }).catch(error => {
@@ -152,7 +159,8 @@ window.__ModuleLoader__.load({
         };
       }, [api, chapterId, page, attempt]);
       function navigate(next) {
-        if (!Number.isSafeInteger(next) || next < 1 || (total !== null && next > total) || next === page) return;
+        if (!Number.isSafeInteger(next) || next < 1 || (totalRef.current !== null && next > totalRef.current) || next === pageRef.current) return;
+        pageRef.current = next;
         cancel();
         setState({ status: 'loading' });
         setInput(String(next));
@@ -173,14 +181,27 @@ window.__ModuleLoader__.load({
         navigate(next);
         setInput(String(next));
       }
-      function keyDown(event) {
-        const tag = event.target && event.target.tagName;
-        if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.defaultPrevented ||
-            tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || event.target.isContentEditable) return;
-        if (event.key === 'ArrowLeft' && page > 1) { event.preventDefault(); navigate(page - 1); }
-        if (event.key === 'ArrowRight' && total !== null && page < total) { event.preventDefault(); navigate(page + 1); }
-      }
-      return h('section', { 'aria-label': '在线阅读', onKeyDown: keyDown },
+      React.useEffect(() => {
+        function keyDown(event) {
+          const path = typeof event.composedPath === 'function' ? event.composedPath() : [event.target];
+          const root = readerRef.current;
+          const target = event.target;
+          const doc = root && root.ownerDocument;
+          if (!root || !doc || (target !== doc.body && target !== doc.documentElement &&
+              !path.includes(root) && !(target && typeof target.nodeType === 'number' && root.contains(target)))) return;
+          if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.defaultPrevented ||
+              path.some(node => node && (['INPUT', 'TEXTAREA', 'SELECT', 'DIALOG'].includes(node.tagName) || node.isContentEditable ||
+                (typeof node.getAttribute === 'function' && (['textbox', 'dialog', 'alertdialog', 'combobox', 'listbox', 'menu'].includes(node.getAttribute('role')) || node.getAttribute('aria-modal') === 'true')) ||
+                (typeof node.closest === 'function' && node.closest('[contenteditable]:not([contenteditable="false"]),[role="textbox"],[role="dialog"],[role="alertdialog"],[role="combobox"],[role="listbox"],[role="menu"],[aria-modal="true"],dialog'))))) return;
+          const currentPage = pageRef.current;
+          const currentTotal = totalRef.current;
+          if (event.key === 'ArrowLeft' && currentPage > 1) { event.preventDefault(); navigate(currentPage - 1); }
+          if (event.key === 'ArrowRight' && currentTotal !== null && currentPage < currentTotal) { event.preventDefault(); navigate(currentPage + 1); }
+        }
+        window.addEventListener('keydown', keyDown);
+        return () => window.removeEventListener('keydown', keyDown);
+      }, [page, total]);
+      return h('section', { ref: readerRef, 'aria-label': '在线阅读' },
         h('button', { type: 'button', className: 'jm-button jm-back', onClick: () => { cancel(); onBack(); } }, '← 返回章节'),
         h('h2', { className: 'jm-heading' }, chapterName || '在线阅读'),
         h('div', { className: 'jm-reader-controls', 'aria-label': '章节切换' },
@@ -207,6 +228,61 @@ window.__ModuleLoader__.load({
             setState({ status: 'error', error: '图片无法显示，请重试。' });
           } })) : null);
     }
+    const SEARCH_SERVER_PAGE_SIZE = 80;
+    const SEARCH_DISPLAY_PAGE_SIZE = 20;
+    const MAX_COVER_BYTES = 1024 * 1024;
+    function SearchResults({ api, data, page, onOpen }) {
+      const [covers, setCovers] = React.useState({});
+      const coverUrls = React.useRef(new Map());
+      const items = data.content.slice(((page - 1) % (SEARCH_SERVER_PAGE_SIZE / SEARCH_DISPLAY_PAGE_SIZE)) * SEARCH_DISPLAY_PAGE_SIZE,
+        ((page - 1) % (SEARCH_SERVER_PAGE_SIZE / SEARCH_DISPLAY_PAGE_SIZE) + 1) * SEARCH_DISPLAY_PAGE_SIZE);
+      React.useEffect(() => {
+        const controller = new AbortController();
+        const urls = new Map();
+        coverUrls.current = urls;
+        let closed = false;
+        let cursor = 0;
+        const ids = [...new Set(items.map(idOf).filter(Boolean))];
+        setCovers({});
+        async function worker() {
+          while (!closed && cursor < ids.length) {
+            const id = ids[cursor++];
+            try {
+              const result = await api.cover(id, controller.signal);
+              if (closed || controller.signal.aborted) return;
+              if (!result || typeof result !== 'object' || Array.isArray(result) || idOf(result) !== id) throw new Error('封面响应编号不匹配。');
+              const blob = imageBlob(result, MAX_COVER_BYTES, ['image/jpeg', 'image/png', 'image/webp']);
+              if (closed || controller.signal.aborted) return;
+              const url = URL.createObjectURL(blob);
+              urls.set(id, url);
+              setCovers(previous => ({ ...previous, [id]: url }));
+            } catch (error) {
+              // A missing or invalid cover is represented by the placeholder.
+            }
+          }
+        }
+        for (let i = 0; i < Math.min(4, ids.length); i++) worker();
+        return () => {
+          closed = true;
+          controller.abort();
+          for (const url of urls.values()) URL.revokeObjectURL(url);
+        };
+      }, [api, data, page]);
+      return h('ul', { className: 'jm-list' }, items.map((item, index) => {
+        const id = idOf(item);
+        const name = text(item && item.name) || '未命名漫画';
+        return h('li', { key: id || index }, h('button', { className: 'jm-item', type: 'button', disabled: !id, onClick: () => onOpen(id) },
+          covers[id] ? h('img', { className: 'jm-cover', src: covers[id], alt: name + '封面', onError: () => {
+            if (coverUrls.current.get(id) !== covers[id]) return;
+            URL.revokeObjectURL(covers[id]);
+            coverUrls.current.delete(id);
+            setCovers(previous => ({ ...previous, [id]: null }));
+          } }) :
+            h('span', { className: 'jm-cover jm-cover-placeholder jm-muted', 'aria-hidden': true }, '暂无封面'),
+          h('strong', null, name),
+          h('span', { className: 'jm-muted' }, [text(item && item.author), id ? '编号 ' + id : '编号不可用'].filter(Boolean).join(' · '))));
+      }));
+    }
     function Panel({ api }) {
       const [query, setQuery] = React.useState('');
       const [search, setSearch] = React.useState({ status: 'idle', query: '', data: null });
@@ -214,6 +290,7 @@ window.__ModuleLoader__.load({
       const [detail, setDetail] = React.useState({ status: 'idle' });
       const [download, setDownload] = React.useState({ status: 'idle' });
       const searchRequest = React.useRef(null);
+      const searchCache = React.useRef(null);
       const detailRequest = React.useRef(null);
       const downloadRequest = React.useRef(null);
       React.useEffect(() => () => {
@@ -225,31 +302,70 @@ window.__ModuleLoader__.load({
         if (detailRequest.current) detailRequest.current.abort();
         detailRequest.current = null;
       }
+      function loadSearch(keyword, page, corrections = 0) {
+        if (searchRequest.current) searchRequest.current.abort();
+        searchRequest.current = null;
+        const serverPage = Math.floor((page - 1) * SEARCH_DISPLAY_PAGE_SIZE / SEARCH_SERVER_PAGE_SIZE) + 1;
+        const cached = searchCache.current;
+        if (cached && cached.keyword === keyword && cached.serverPage === serverPage) {
+          setSearch({ status: 'done', query: keyword, page, data: cached.data });
+          return;
+        }
+        const controller = new AbortController();
+        searchRequest.current = controller;
+        setSearch({ status: 'loading', query: keyword, page, data: null });
+        Promise.resolve().then(() => api.search(keyword, serverPage, controller.signal)).then(result => {
+          if (searchRequest.current !== controller || controller.signal.aborted) return;
+          if (!result || (result.type !== 'search' && result.type !== 'comic') || !result.data || typeof result.data !== 'object') throw new Error('搜索结果格式不正确');
+          if (result.type === 'comic') {
+            if (!idOf(result.data)) throw new Error('漫画详情格式不正确');
+            searchRequest.current = null;
+            setSearch({ status: 'done', query: keyword, page, data: null });
+            setView({ kind: 'comic', id: idOf(result.data) });
+            setDetail({ status: 'done', data: result.data });
+          } else {
+            const total = typeof result.data.total === 'string' && /^\d+$/.test(result.data.total) ? Number(result.data.total) : result.data.total;
+            if (!Array.isArray(result.data.content) || !Number.isSafeInteger(total) || total < 0) throw new Error('搜索结果格式不正确');
+            searchRequest.current = null;
+            if (total === 0) {
+              // An empty result from any server page is the first-page empty state.
+              searchCache.current = null;
+              setSearch({ status: 'done', query: keyword, page: 1, data: { ...result.data, content: [] } });
+              return;
+            }
+            const lastPage = Math.ceil(total / SEARCH_DISPLAY_PAGE_SIZE);
+            searchCache.current = { keyword, serverPage, data: result.data };
+            if (page > lastPage) {
+              const lastServerPage = Math.floor((lastPage - 1) * SEARCH_DISPLAY_PAGE_SIZE / SEARCH_SERVER_PAGE_SIZE) + 1;
+              if (lastServerPage === serverPage) {
+                setSearch({ status: 'done', query: keyword, page: lastPage, data: result.data });
+              } else if (corrections < 3) {
+                loadSearch(keyword, lastPage, corrections + 1);
+              } else {
+                searchCache.current = null;
+                setSearch({ status: 'error', query: keyword, page: 1, data: null, resetToFirst: true, error: '搜索结果持续变化，请回到第 1 页重试。' });
+              }
+              return;
+            }
+            setSearch({ status: 'done', query: keyword, page, data: result.data });
+          }
+        }).catch(error => {
+          if (searchRequest.current === controller && !controller.signal.aborted) {
+            searchRequest.current = null;
+            setSearch({ status: 'error', query: keyword, page, data: null, error: text(error && error.message) || '未知错误' });
+          }
+        });
+      }
       function runSearch(event) {
         event.preventDefault();
         const keyword = query.trim();
         if (!keyword) return;
         if (downloadRequest.current) cancelDownload();
         setDownload({ status: 'idle' });
-        if (searchRequest.current) searchRequest.current.abort();
         cancelDetail();
-        const controller = new AbortController();
-        searchRequest.current = controller;
+        searchCache.current = null;
         setView({ kind: 'search' });
-        setSearch({ status: 'loading', query: keyword, data: null });
-        Promise.resolve().then(() => api.search(keyword, 1, controller.signal)).then(result => {
-          if (searchRequest.current !== controller || controller.signal.aborted) return;
-          if (!result || (result.type !== 'search' && result.type !== 'comic') || !result.data || typeof result.data !== 'object') throw new Error('搜索结果格式不正确');
-          if (result.type === 'search' && !Array.isArray(result.data.content)) throw new Error('搜索结果格式不正确');
-          if (result.type === 'comic') {
-            if (!idOf(result.data)) throw new Error('漫画详情格式不正确');
-            setSearch({ status: 'done', query: keyword, data: null });
-            setView({ kind: 'comic', id: idOf(result.data) });
-            setDetail({ status: 'done', data: result.data });
-          } else setSearch({ status: 'done', query: keyword, data: result.data });
-        }).catch(error => {
-          if (searchRequest.current === controller && !controller.signal.aborted) setSearch({ status: 'error', query: keyword, error: text(error && error.message) || '未知错误' });
-        });
+        loadSearch(keyword, 1);
       }
       function openDetail(kind, id, parent) {
         if (downloadRequest.current) cancelDownload();
@@ -317,6 +433,10 @@ window.__ModuleLoader__.load({
         return id && id !== view.id ? { id, name: text(chapter.name) } : null;
       }
       const content = search.data && Array.isArray(search.data.content) ? search.data.content : [];
+      const searchPage = search.page || 1;
+      const searchTotalPages = search.data ? Math.ceil(Number(search.data.total) / SEARCH_DISPLAY_PAGE_SIZE) : 0;
+      const searchOffset = ((searchPage - 1) % (SEARCH_SERVER_PAGE_SIZE / SEARCH_DISPLAY_PAGE_SIZE)) * SEARCH_DISPLAY_PAGE_SIZE;
+      const pageHasResults = content.slice(searchOffset, searchOffset + SEARCH_DISPLAY_PAGE_SIZE).length > 0;
       return h('main', { className: 'jm-panel' }, h('style', null, css), h('div', { className: 'jm-inner' },
         h('h1', { className: 'jm-title' }, '漫画搜索'),
         h('p', { className: 'jm-muted' }, '匿名搜索漫画，查看漫画和章节信息。'),
@@ -325,18 +445,18 @@ window.__ModuleLoader__.load({
           h('button', { className: 'jm-button', type: 'submit', disabled: !query.trim() }, '搜索')),
         view.kind === 'search' ? h(React.Fragment, null,
           h(Status, { state: search }),
+          search.status === 'error' ? h('button', { type: 'button', className: 'jm-button', onClick: () => loadSearch(search.query, search.page || 1) }, search.resetToFirst ? '回到第 1 页重试' : '重试搜索') : null,
           search.status === 'idle' ? h('p', { className: 'jm-box jm-muted' }, '输入关键词开始搜索。') : null,
           search.status === 'done' && !search.data ? h('p', { className: 'jm-box jm-muted' }, '搜索结果直接定位到漫画，可继续搜索其他内容。') : null,
           search.status === 'done' && search.data ? h(React.Fragment, null,
             h('h2', { className: 'jm-heading' }, '搜索结果'),
             metadata('关键词', search.query), metadata('结果总数', search.data.total),
-            content.length === 0 ? h('p', { className: 'jm-box jm-muted' }, '没有找到相关漫画。') :
-              h('ul', { className: 'jm-list' }, content.map((item, index) => {
-                const id = idOf(item);
-                return h('li', { key: id || index }, h('button', { className: 'jm-item', type: 'button', disabled: !id, onClick: () => openDetail('comic', id) },
-                  h('strong', null, text(item && item.name) || '未命名漫画'),
-                  h('span', { className: 'jm-muted' }, [text(item && item.author), id ? '编号 ' + id : '编号不可用'].filter(Boolean).join(' · '))));
-              }))) : null) : view.kind === 'reader' ? h(Reader, {
+            pageHasResults ? h(SearchResults, { key: search.query + ':' + searchPage, api, data: search.data, page: searchPage, onOpen: id => openDetail('comic', id) }) :
+              h('p', { className: 'jm-box jm-muted' }, searchPage === 1 ? '没有找到相关漫画。' : '本页没有搜索结果。'),
+            searchTotalPages > 0 ? h('nav', { className: 'jm-reader-controls', 'aria-label': '搜索结果分页' },
+              h('button', { type: 'button', className: 'jm-button', disabled: searchPage <= 1, onClick: () => loadSearch(search.query, searchPage - 1) }, '上一页'),
+              h('span', { 'aria-live': 'polite' }, '第 ' + searchPage + ' 页 / 共 ' + searchTotalPages + ' 页'),
+              h('button', { type: 'button', className: 'jm-button', disabled: searchPage >= searchTotalPages, onClick: () => loadSearch(search.query, searchPage + 1) }, '下一页')) : null) : null) : view.kind === 'reader' ? h(Reader, {
           key: view.id, api, chapterId: view.id, chapterName: view.name,
           previousChapter: adjacentChapter(-1), nextChapter: adjacentChapter(1),
           onChapter: chapter => {

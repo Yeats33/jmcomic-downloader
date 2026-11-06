@@ -23,6 +23,7 @@ export const remote = createTypertRemoteInfo({
     'jmcomic/search': method(['keyword', 'page']),
     'jmcomic/comic': method(['id']),
     'jmcomic/chapter': method(['id']),
+    'jmcomic/cover': method(['id']),
     'jmcomic/readPage': method(['id', 'page']),
     'jmcomic/download': method(['id']),
   },

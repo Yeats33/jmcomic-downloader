@@ -45,6 +45,16 @@ test('client registers sidebar and main, calls same-origin strict Gateway', asyn
   assert.equal(requests[0].init.redirect, 'error');
 });
 
+test('button styles use theme-aware foreground and interaction colors', () => {
+  const styles = source.match(/const css = `([\s\S]*?)`;/)?.[1];
+  assert.ok(styles, 'client stylesheet exists');
+  assert.match(styles, /\.jm-button\{[^}]*background:transparent/);
+  assert.match(styles, /\.jm-button\{[^}]*color:var\(--dsw-alias-label-primary/);
+  assert.match(styles, /\.jm-button:hover:not\(:disabled\)[^{]*\{background:var\(--dsw-alias-interactive-bg-hover/);
+  assert.match(styles, /\.jm-item:hover:not\(:disabled\)/);
+  assert.doesNotMatch(styles, /--dsw-alias-fill-l1/);
+});
+
 test('client rejects mismatched envelopes, host failures and invalid JSON', async () => {
   const { adapter: badId } = load(async () => response({}, 'other'));
   await assert.rejects(badId.comic('1'), /请求标识/);
